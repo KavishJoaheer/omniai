@@ -1,0 +1,36 @@
+from datetime import datetime, timezone
+from typing import Literal
+from uuid import uuid4
+
+from pydantic import BaseModel, Field
+
+
+DocumentStatus = Literal["PENDING", "PARSING", "EMBEDDING", "INDEXING", "READY", "FAILED", "CANCELLED"]
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Collection(BaseModel):
+    id: str = Field(default_factory=lambda: f"col_{uuid4().hex[:12]}")
+    tenant_id: str = ""
+    name: str
+    description: str | None = None
+    embedding_model: str = "text-embedding-default"
+    chunk_template: str = "general"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    document_count: int = 0
+
+
+class Document(BaseModel):
+    id: str = Field(default_factory=lambda: f"doc_{uuid4().hex[:12]}")
+    tenant_id: str = ""
+    collection_id: str
+    name: str
+    mime_type: str = "application/octet-stream"
+    size_bytes: int = 0
+    status: DocumentStatus = "PENDING"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

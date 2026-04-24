@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  api:
+    image: python:3.12-slim
+    working_dir: /workspace
+    command: >
+      sh -c "pip install -e ./backend &&
+      uvicorn omniai.interfaces.http.app:create_app --factory --host 0.0.0.0 --port 9380 --app-dir backend"
+    ports:
+      - "9380:9380"
+    environment:
+      HTTP_PORT: 9380
+      APP_ENV: development
+      APP_NAME: Omni-AI
+      API_CORS_ORIGINS: http://localhost:5173
+    volumes:
+      - ../..:/workspace
+
+  frontend:
+    image: node:20
+    working_dir: /workspace/frontend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      - api

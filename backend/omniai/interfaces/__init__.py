@@ -1,0 +1,2 @@
+"""Inbound interface adapters."""
+
