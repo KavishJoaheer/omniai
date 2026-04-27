@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+import json
+from datetime import datetime
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from omniai.adapters.relational.sqlalchemy.models import CollectionRecord, DocumentRecord, TenantRecord
+from omniai.adapters.relational.sqlalchemy.models import (
+    ChunkRecord,
+    CollectionRecord,
+    DocumentRecord,
+    TenantRecord,
+)
 from omniai.application.store import KnowledgeStore
-from omniai.domain.knowledge.models import Collection, Document, utc_now
+from omniai.domain.knowledge.models import Chunk, Collection, Document, utc_now
 
 
 def ensure_tenant(session: Session, *, slug: str, name: str) -> TenantRecord:
@@ -179,9 +187,10 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
         record.status = status
         if status == "FAILED":
             record.error_message = error_message
-        elif status == "READY":
+        elif status in ("PARSED", "READY"):
             record.error_message = None
-            record.parsed_at = utc_now()
+            if status == "PARSED":
+                record.parsed_at = utc_now()
             if parsed_text_key is not None:
                 record.parsed_text_key = parsed_text_key
             if page_count is not None:
@@ -192,6 +201,59 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
         self._session.commit()
         self._session.refresh(record)
         return self._to_document(record)
+
+    def replace_chunks(
+        self,
+        *,
+        document_id: str,
+        chunks: list[dict],
+        template_name: str,
+    ) -> list[Chunk]:
+        document = self._get_document_record(document_id)
+        self._session.execute(delete(ChunkRecord).where(ChunkRecord.document_id == document_id))
+        records: list[ChunkRecord] = []
+        for ordinal, chunk in enumerate(chunks):
+            text = chunk["text"]
+            metadata = chunk.get("metadata") or {}
+            record = ChunkRecord(
+                tenant_id=self._tenant_id,
+                collection_id=document.collection_id,
+                document_id=document_id,
+                ordinal=ordinal,
+                text=text,
+                char_count=len(text),
+                token_count=max(1, len(text.split())),
+                template_name=template_name,
+                metadata_json=json.dumps(metadata, separators=(",", ":"), sort_keys=True),
+            )
+            self._session.add(record)
+            records.append(record)
+        self._session.commit()
+        for record in records:
+            self._session.refresh(record)
+        return [self._to_chunk(r) for r in records]
+
+    def list_chunks(self, *, document_id: str) -> list[Chunk]:
+        statement = (
+            select(ChunkRecord)
+            .where(
+                ChunkRecord.document_id == document_id,
+                ChunkRecord.tenant_id == self._tenant_id,
+            )
+            .order_by(ChunkRecord.ordinal.asc())
+        )
+        return [self._to_chunk(r) for r in self._session.scalars(statement)]
+
+    def mark_chunks_indexed(self, *, document_id: str, indexed_at: datetime) -> None:
+        records = self._session.scalars(
+            select(ChunkRecord).where(
+                ChunkRecord.document_id == document_id,
+                ChunkRecord.tenant_id == self._tenant_id,
+            )
+        )
+        for record in records:
+            record.indexed_at = indexed_at
+        self._session.commit()
 
     def _get_document_record(self, document_id: str) -> DocumentRecord:
         record = self._session.scalar(
@@ -224,6 +286,28 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
             created_at=record.created_at,
             updated_at=record.updated_at,
             document_count=record.document_count,
+        )
+
+    @staticmethod
+    def _to_chunk(record: ChunkRecord) -> Chunk:
+        try:
+            metadata = json.loads(record.metadata_json) if record.metadata_json else {}
+        except json.JSONDecodeError:
+            metadata = {}
+        return Chunk(
+            id=record.id,
+            tenant_id=record.tenant_id,
+            collection_id=record.collection_id,
+            document_id=record.document_id,
+            ordinal=record.ordinal,
+            text=record.text,
+            char_count=record.char_count,
+            token_count=record.token_count,
+            template_name=record.template_name,
+            metadata=metadata,
+            indexed_at=record.indexed_at,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
         )
 
     @staticmethod

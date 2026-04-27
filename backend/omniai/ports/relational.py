@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
-from omniai.domain.knowledge.models import Collection, Document
+from omniai.domain.knowledge.models import Chunk, Collection, Document
 
 
 class KnowledgeStorePort(Protocol):
@@ -53,6 +54,18 @@ class KnowledgeStorePort(Protocol):
         page_count: int | None = None,
         parser_name: str | None = None,
     ) -> Document: ...
+
+    def replace_chunks(
+        self,
+        *,
+        document_id: str,
+        chunks: list[dict],
+        template_name: str,
+    ) -> list[Chunk]: ...
+
+    def list_chunks(self, *, document_id: str) -> list[Chunk]: ...
+
+    def mark_chunks_indexed(self, *, document_id: str, indexed_at: datetime) -> None: ...
 
     def count_collections(self) -> int: ...
 

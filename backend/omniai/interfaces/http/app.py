@@ -12,6 +12,7 @@ from omniai.interfaces.http.routes.documents import (
     document_router as documents_router,
 )
 from omniai.interfaces.http.routes.providers import router as providers_router
+from omniai.interfaces.http.routes.retrieval import router as retrieval_router
 from omniai.interfaces.http.routes.system import router as system_router
 from omniai.interfaces.http.routes.teams import router as teams_router
 from omniai.interfaces.http.routes.tenants import router as tenants_router
@@ -57,5 +58,6 @@ def create_app() -> FastAPI:
     app.include_router(documents_collection_router)
     app.include_router(documents_router)
     app.include_router(providers_router)
+    app.include_router(retrieval_router)
 
     return app

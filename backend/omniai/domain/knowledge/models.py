@@ -5,7 +5,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 
-DocumentStatus = Literal["PENDING", "PARSING", "EMBEDDING", "INDEXING", "READY", "FAILED", "CANCELLED"]
+DocumentStatus = Literal["PENDING", "PARSING", "PARSED", "EMBEDDING", "INDEXING", "READY", "FAILED", "CANCELLED"]
 
 
 def utc_now() -> datetime:
@@ -22,6 +22,22 @@ class Collection(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     document_count: int = 0
+
+
+class Chunk(BaseModel):
+    id: str = Field(default_factory=lambda: f"chk_{uuid4().hex[:12]}")
+    tenant_id: str = ""
+    collection_id: str
+    document_id: str
+    ordinal: int
+    text: str
+    char_count: int = 0
+    token_count: int = 0
+    template_name: str = "general"
+    metadata: dict = Field(default_factory=dict)
+    indexed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class Document(BaseModel):

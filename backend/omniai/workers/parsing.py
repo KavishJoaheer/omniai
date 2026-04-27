@@ -8,8 +8,12 @@ from omniai.adapters.relational.sqlalchemy.session import DatabaseManager
 from omniai.application.ingestion_service import build_parsed_text_key
 from omniai.plugins.parsers import ParserRegistry
 from omniai.ports.object_store import ObjectStorePort
+from omniai.ports.queue import JobQueuePort
 
 logger = logging.getLogger(__name__)
+
+
+INDEX_JOB_NAME = "index_document"
 
 
 async def parse_document(
@@ -17,6 +21,7 @@ async def parse_document(
     database: DatabaseManager,
     object_store: ObjectStorePort,
     parsers: ParserRegistry,
+    queue: JobQueuePort,
     tenant_id: str,
     document_id: str,
 ) -> None:
@@ -73,9 +78,14 @@ async def parse_document(
 
         store.update_status(
             document_id=document_id,
-            status="READY",
+            status="PARSED",
             parsed_text_key=parsed_text_key,
             page_count=result.page_count,
             parser_name=parser.name,
         )
-        logger.info("parse_document: %s ready (parser=%s, %d chars)", document_id, parser.name, len(result.text))
+        logger.info("parse_document: %s parsed (parser=%s, %d chars) — queuing index", document_id, parser.name, len(result.text))
+
+    await queue.enqueue(
+        job_name=INDEX_JOB_NAME,
+        payload={"tenant_id": tenant_id, "document_id": document_id},
+    )

@@ -155,6 +155,23 @@ class ApiKeyRecord(TimestampMixin, Base):
     created_by_user: Mapped[UserRecord] = relationship(back_populates="created_api_keys")
 
 
+class ChunkRecord(TimestampMixin, Base):
+    __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("document_id", "ordinal", name="uq_chunk_document_ordinal"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_prefixed_id("chk"))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    collection_id: Mapped[str] = mapped_column(ForeignKey("collections.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text())
+    char_count: Mapped[int] = mapped_column(Integer, default=0)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    template_name: Mapped[str] = mapped_column(String(64), default="general")
+    metadata_json: Mapped[str] = mapped_column(Text(), default="{}")
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ProviderRecord(TimestampMixin, Base):
     __tablename__ = "providers"
     __table_args__ = (UniqueConstraint("tenant_id", "kind", "name", name="uq_provider_tenant_kind_name"),)

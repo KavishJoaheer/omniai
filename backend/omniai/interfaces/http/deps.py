@@ -7,11 +7,15 @@ from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowled
 from omniai.application.auth_service import AuthService, AuthenticatedPrincipal
 from omniai.application.ingestion_service import IngestionService
 from omniai.application.provider_service import ProviderActor, ProviderService
+from omniai.application.retrieval_service import RetrievalService
 from omniai.application.services import KnowledgeService
 from omniai.observability.metrics import MetricsRegistry
+from omniai.plugins.chunk_templates.registry import ChunkTemplateRegistry
+from omniai.plugins.embedding_providers.factory import build_embedding_provider
 from omniai.plugins.parsers import ParserRegistry
 from omniai.ports.object_store import ObjectStorePort
 from omniai.ports.queue import JobQueuePort
+from omniai.ports.search_engine import SearchEnginePort
 from omniai.security.secrets import SecretBox
 
 
@@ -119,3 +123,31 @@ def principal_to_provider_actor(principal: AuthenticatedPrincipal) -> ProviderAc
 
 def get_metrics(request: Request) -> MetricsRegistry:
     return request.app.state.container.metrics
+
+
+def get_search_engine(request: Request) -> SearchEnginePort:
+    return request.app.state.container.search_engine
+
+
+def get_chunk_templates(request: Request) -> ChunkTemplateRegistry:
+    return request.app.state.container.chunk_templates
+
+
+def get_retrieval_service(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    search_engine: SearchEnginePort = Depends(get_search_engine),
+) -> RetrievalService:
+    settings = request.app.state.container.settings
+    provider, _ = build_embedding_provider(
+        session=session,
+        settings=settings,
+        tenant_id=principal.tenant_id,
+        requested_model="nomic-embed-text",
+    )
+    return RetrievalService(
+        search_engine=search_engine,
+        embedding_provider=provider,
+        tenant_id=principal.tenant_id,
+    )
