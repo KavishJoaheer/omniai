@@ -70,6 +70,13 @@ class DocumentRecord(TimestampMixin, Base):
     mime_type: Mapped[str] = mapped_column(String(255), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(32), default="PENDING")
+    object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    parsed_text_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    page_count: Mapped[int] = mapped_column(Integer, default=0)
+    parser_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped[TenantRecord] = relationship(back_populates="documents")
     collection: Mapped[CollectionRecord] = relationship(back_populates="documents")

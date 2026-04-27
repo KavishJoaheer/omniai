@@ -28,7 +28,31 @@ class KnowledgeStorePort(Protocol):
         size_bytes: int,
     ) -> Document: ...
 
+    def create_document_with_storage(
+        self,
+        *,
+        collection_id: str,
+        name: str,
+        mime_type: str,
+        size_bytes: int,
+        object_key: str,
+        content_sha256: str,
+    ) -> Document: ...
+
     def list_documents(self, collection_id: str) -> list[Document]: ...
+
+    def get_document(self, document_id: str) -> Document: ...
+
+    def update_status(
+        self,
+        *,
+        document_id: str,
+        status: str,
+        error_message: str | None = None,
+        parsed_text_key: str | None = None,
+        page_count: int | None = None,
+        parser_name: str | None = None,
+    ) -> Document: ...
 
     def count_collections(self) -> int: ...
 

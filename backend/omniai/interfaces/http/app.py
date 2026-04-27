@@ -7,7 +7,10 @@ from omniai.interfaces.http.routes.admin import router as admin_router
 from omniai.interfaces.http.routes.api_keys import router as api_keys_router
 from omniai.interfaces.http.routes.auth import router as auth_router
 from omniai.interfaces.http.routes.collections import router as collections_router
-from omniai.interfaces.http.routes.documents import router as documents_router
+from omniai.interfaces.http.routes.documents import (
+    collection_router as documents_collection_router,
+    document_router as documents_router,
+)
 from omniai.interfaces.http.routes.providers import router as providers_router
 from omniai.interfaces.http.routes.system import router as system_router
 from omniai.interfaces.http.routes.teams import router as teams_router
@@ -51,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(teams_router)
     app.include_router(admin_router)
     app.include_router(collections_router)
+    app.include_router(documents_collection_router)
     app.include_router(documents_router)
     app.include_router(providers_router)
 

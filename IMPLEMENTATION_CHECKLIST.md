@@ -63,7 +63,7 @@ Legend:
   Note: ports and bootstrap now exist; worker/scheduler/sandbox land with M3+.
 - [x] Repository abstractions / ports (`omniai/ports/`)
 - [x] Real persistence adapters (SQLAlchemy implementing `KnowledgeStorePort`)
-- [ ] Worker process
+- [x] Worker process (Arq-based + inline fallback for dev)
 - [ ] Scheduler process
 - [ ] Sandbox runner
 - [x] Dependency injection container (`omniai/bootstrap/container.py`)
@@ -84,11 +84,11 @@ Legend:
 
 ## Knowledge and Ingestion
 
-- [ ] Multipart file upload handling
-- [ ] Actual file byte storage
-- [ ] MIME validation
-- [ ] Parsing pipeline
-- [ ] Multi-format extraction
+- [x] Multipart file upload handling (`POST /v1/collections/{id}/documents/upload`)
+- [x] Actual file byte storage (S3-compatible via MinIO + local-fs fallback)
+- [x] MIME validation (parser registry rejects unsupported types)
+- [x] Parsing pipeline (skeleton: source -> extract; chunking/embedding land in M4)
+- [x] Multi-format extraction (TXT, MD, CSV, HTML, PDF, DOCX)
 - [ ] Chunking templates
 - [ ] Chunk review and edit
 - [ ] Embedding model selection

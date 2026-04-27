@@ -32,5 +32,12 @@ class Document(BaseModel):
     mime_type: str = "application/octet-stream"
     size_bytes: int = 0
     status: DocumentStatus = "PENDING"
+    object_key: str | None = None
+    parsed_text_key: str | None = None
+    content_sha256: str | None = None
+    page_count: int = 0
+    parser_name: str | None = None
+    error_message: str | None = None
+    parsed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

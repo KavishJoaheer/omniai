@@ -5,9 +5,13 @@ from sqlalchemy.orm import Session
 
 from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
 from omniai.application.auth_service import AuthService, AuthenticatedPrincipal
+from omniai.application.ingestion_service import IngestionService
 from omniai.application.provider_service import ProviderActor, ProviderService
 from omniai.application.services import KnowledgeService
 from omniai.observability.metrics import MetricsRegistry
+from omniai.plugins.parsers import ParserRegistry
+from omniai.ports.object_store import ObjectStorePort
+from omniai.ports.queue import JobQueuePort
 from omniai.security.secrets import SecretBox
 
 
@@ -68,6 +72,37 @@ def get_knowledge_service(
 ) -> KnowledgeService:
     store = SqlAlchemyKnowledgeStore(session, principal.tenant_id)
     return KnowledgeService(store)
+
+
+def get_object_store(request: Request) -> ObjectStorePort:
+    return request.app.state.container.object_store
+
+
+def get_job_queue(request: Request) -> JobQueuePort:
+    return request.app.state.container.job_queue
+
+
+def get_parser_registry(request: Request) -> ParserRegistry:
+    return request.app.state.container.parsers
+
+
+def get_ingestion_service(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    object_store: ObjectStorePort = Depends(get_object_store),
+    queue: JobQueuePort = Depends(get_job_queue),
+    parsers: ParserRegistry = Depends(get_parser_registry),
+) -> IngestionService:
+    store = SqlAlchemyKnowledgeStore(session, principal.tenant_id)
+    return IngestionService(
+        store=store,
+        object_store=object_store,
+        queue=queue,
+        parsers=parsers,
+        tenant_id=principal.tenant_id,
+        max_bytes=request.app.state.container.settings.upload_max_bytes,
+    )
 
 
 def get_provider_service(

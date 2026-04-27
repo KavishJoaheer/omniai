@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     object_store_access_key: str | None = Field(default=None, alias="OBJECT_STORE_ACCESS_KEY")
     object_store_secret_key: str | None = Field(default=None, alias="OBJECT_STORE_SECRET_KEY")
     object_store_bucket: str = Field(default="omniai", alias="OBJECT_STORE_BUCKET")
+    object_store_local_dir: str = Field(default="./.omniai-storage", alias="OBJECT_STORE_LOCAL_DIR")
+
+    upload_max_bytes: int = Field(default=100 * 1024 * 1024, alias="UPLOAD_MAX_BYTES")
+    worker_inline: bool = Field(default=False, alias="WORKER_INLINE")
 
     search_kind: str = Field(default="opensearch", alias="SEARCH_KIND")
     search_url: str | None = Field(default=None, alias="SEARCH_URL")

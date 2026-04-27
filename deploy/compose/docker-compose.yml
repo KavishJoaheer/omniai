@@ -108,6 +108,36 @@ services:
     volumes:
       - ../..:/workspace
 
+  worker:
+    image: python:3.12-slim
+    working_dir: /workspace
+    command: >
+      sh -c "pip install -e ./backend &&
+      arq omniai.workers.worker.WorkerSettings"
+    environment:
+      APP_ENV: development
+      DB_URL: postgresql+psycopg://omniai:omniai@postgres:5432/omniai
+      REDIS_URL: redis://redis:6379/0
+      OBJECT_STORE_KIND: s3
+      OBJECT_STORE_ENDPOINT: http://minio:9000
+      OBJECT_STORE_REGION: us-east-1
+      OBJECT_STORE_ACCESS_KEY: omniai
+      OBJECT_STORE_SECRET_KEY: omniai-minio-dev
+      OBJECT_STORE_BUCKET: omniai
+      ENCRYPTION_KEY: dev-only-do-not-use-in-prod-change-me-32b
+      AUTH_SECRET: dev-only-change-me
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../..:/workspace
+
   frontend:
     image: node:20
     working_dir: /workspace/frontend

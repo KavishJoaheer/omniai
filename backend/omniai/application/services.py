@@ -40,6 +40,9 @@ class KnowledgeService:
     def list_documents(self, collection_id: str) -> list[Document]:
         return self._store.list_documents(collection_id)
 
+    def get_document(self, document_id: str) -> Document:
+        return self._store.get_document(document_id)
+
     def create_document(self, collection_id: str, payload: CreateDocumentInput) -> Document:
         return self._store.create_document(
             collection_id=collection_id,
