@@ -17,8 +17,9 @@ Legend:
 - [x] Backend package scaffold under `backend/`
 - [x] Frontend package scaffold under `frontend/`
 - [x] Local Docker Compose starter under `deploy/compose/docker-compose.yml`
+- [x] Docker Compose includes Postgres, Redis, MinIO, OpenSearch
 - [ ] CI workflow
-- [ ] Git repository initialization
+- [x] Git repository initialization
 
 ## Backend API
 
@@ -47,8 +48,8 @@ Legend:
 - [ ] Assistant endpoints
 - [ ] Session endpoints
 - [ ] Agent endpoints
-- [ ] Provider endpoints
-- [ ] API key endpoints
+- [x] Provider endpoints (CRUD + Ollama model discovery)
+- [x] API key endpoints
 - [ ] OpenAI-compatible endpoints
 - [ ] MCP endpoints
 
@@ -59,24 +60,24 @@ Legend:
 - [x] Application service for collection and document operations
 - [x] SQLAlchemy persistence foundation
 - [~] Architecture-aligned folder naming
-  Note: the naming follows the architecture doc, but most planned modules are still empty or absent.
-- [ ] Repository abstractions / ports
-- [ ] Real persistence adapters
+  Note: ports and bootstrap now exist; worker/scheduler/sandbox land with M3+.
+- [x] Repository abstractions / ports (`omniai/ports/`)
+- [x] Real persistence adapters (SQLAlchemy implementing `KnowledgeStorePort`)
 - [ ] Worker process
 - [ ] Scheduler process
 - [ ] Sandbox runner
-- [ ] Dependency injection container
+- [x] Dependency injection container (`omniai/bootstrap/container.py`)
 
 ## Data and Persistence
 
-- [ ] PostgreSQL integration
+- [x] PostgreSQL integration (driver wired, compose service, env defaults)
 - [x] SQLAlchemy models
-- [ ] Alembic migrations
-- [ ] OpenSearch integration
-- [ ] MinIO / object store integration
-- [ ] Redis / queue integration
-- [ ] Persistent document storage
-- [ ] Persistent collection storage
+- [x] Alembic migrations (baseline 0001)
+- [~] OpenSearch integration (compose service + port stub; adapter lands in M4)
+- [~] MinIO / object store integration (compose service + port stub; adapter lands in M3)
+- [~] Redis / queue integration (compose service; cache port stub; adapter lands in M3)
+- [ ] Persistent document storage (file bytes — M3)
+- [ ] Persistent collection storage (file bytes n/a; metadata done)
 - [x] Persistent document metadata storage
 - [x] Persistent collection metadata storage
 - [x] Tenant-aware relational partitioning
@@ -136,9 +137,10 @@ Legend:
 - [x] Team model
 - [x] Roles and permissions foundation
 - [x] Audit trail model and endpoints
-- [ ] Secret encryption
-- [ ] Rate limiting
-- [ ] Idempotency keys
+- [x] Role -> permission matrix (`security/permissions.py`)
+- [x] Secret encryption (Fernet via `security/secrets.py`, used for provider credentials)
+- [ ] Rate limiting (deferred to M3 with upload throttling)
+- [ ] Idempotency keys (deferred to M3)
 - [ ] Webhook signature validation
 
 ## Frontend

@@ -21,10 +21,8 @@ from omniai.adapters.relational.sqlalchemy.models import (
 from omniai.config.settings import Settings
 from omniai.domain.knowledge.models import utc_now
 from omniai.security.hashing import hash_api_key, hash_password, verify_password
+from omniai.security.permissions import Perm, assert_permission
 from omniai.security.tokens import create_session_token, verify_session_token
-
-
-ROLE_NAMES = {"OWNER", "ADMIN", "MEMBER", "VIEWER"}
 
 
 @dataclass(slots=True)
@@ -252,7 +250,7 @@ class AuthService:
         ]
 
     def create_api_key(self, principal: AuthenticatedPrincipal, payload: CreateApiKeyInput) -> dict:
-        self._assert_role(principal.role, {"OWNER", "ADMIN", "MEMBER"})
+        assert_permission(principal.role, Perm.API_KEYS_WRITE)
         raw_key = f"omsk_{secrets.token_urlsafe(32)}"
         record = ApiKeyRecord(
             tenant_id=principal.tenant_id,
@@ -346,7 +344,7 @@ class AuthService:
         ]
 
     def list_users(self, principal: AuthenticatedPrincipal) -> list[dict]:
-        self._assert_role(principal.role, {"OWNER", "ADMIN"})
+        assert_permission(principal.role, Perm.USERS_READ)
         statement = (
             select(TenantMembershipRecord, UserRecord)
             .join(UserRecord, UserRecord.id == TenantMembershipRecord.user_id)
@@ -366,7 +364,7 @@ class AuthService:
         ]
 
     def list_audit_events(self, principal: AuthenticatedPrincipal) -> list[dict]:
-        self._assert_role(principal.role, {"OWNER", "ADMIN"})
+        assert_permission(principal.role, Perm.AUDIT_READ)
         statement = (
             select(AuditEventRecord)
             .where(AuditEventRecord.tenant_id == principal.tenant_id)
@@ -420,7 +418,7 @@ class AuthService:
         return results
 
     def create_team(self, principal: AuthenticatedPrincipal, payload: CreateTeamInput) -> dict:
-        self._assert_role(principal.role, {"OWNER", "ADMIN", "MEMBER"})
+        assert_permission(principal.role, Perm.TEAM_WRITE)
         duplicate = self._session.scalar(
             select(TeamRecord).where(
                 TeamRecord.tenant_id == principal.tenant_id,
@@ -551,9 +549,3 @@ class AuthService:
             return []
         return [scope for scope in scopes.split(",") if scope]
 
-    @staticmethod
-    def _assert_role(role: str, allowed_roles: set[str]) -> None:
-        if role not in ROLE_NAMES:
-            raise PermissionError("Unknown role.")
-        if role not in allowed_roles:
-            raise PermissionError("You do not have permission to perform this action.")

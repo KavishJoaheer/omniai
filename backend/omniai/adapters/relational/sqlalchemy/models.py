@@ -41,6 +41,7 @@ class TenantRecord(Base):
     teams: Mapped[list["TeamRecord"]] = relationship(back_populates="tenant")
     api_keys: Mapped[list["ApiKeyRecord"]] = relationship(back_populates="tenant")
     audit_events: Mapped[list["AuditEventRecord"]] = relationship(back_populates="tenant")
+    providers: Mapped[list["ProviderRecord"]] = relationship(back_populates="tenant")
 
 
 class CollectionRecord(TimestampMixin, Base):
@@ -145,6 +146,24 @@ class ApiKeyRecord(TimestampMixin, Base):
 
     tenant: Mapped[TenantRecord] = relationship(back_populates="api_keys")
     created_by_user: Mapped[UserRecord] = relationship(back_populates="created_api_keys")
+
+
+class ProviderRecord(TimestampMixin, Base):
+    __tablename__ = "providers"
+    __table_args__ = (UniqueConstraint("tenant_id", "kind", "name", name="uq_provider_tenant_kind_name"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_prefixed_id("prv"))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    default_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    enabled: Mapped[int] = mapped_column(Integer, default=0)
+    has_credentials: Mapped[int] = mapped_column(Integer, default=0)
+    encrypted_credentials: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    options_json: Mapped[str] = mapped_column(Text(), default="{}")
+
+    tenant: Mapped[TenantRecord] = relationship(back_populates="providers")
 
 
 class AuditEventRecord(Base):

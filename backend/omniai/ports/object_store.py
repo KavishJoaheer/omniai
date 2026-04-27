@@ -1,0 +1,13 @@
+from __future__ import annotations
+
+from typing import BinaryIO, Protocol
+
+
+class ObjectStorePort(Protocol):
+    def put_object(self, *, key: str, data: BinaryIO, content_type: str, size: int) -> str: ...
+
+    def get_object(self, *, key: str) -> bytes: ...
+
+    def delete_object(self, *, key: str) -> None: ...
+
+    def presigned_get_url(self, *, key: str, expires_seconds: int = 3600) -> str: ...
