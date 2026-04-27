@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
 from omniai.application.auth_service import AuthService, AuthenticatedPrincipal
+from omniai.application.chat_service import ChatService
 from omniai.application.ingestion_service import IngestionService
 from omniai.application.provider_service import ProviderActor, ProviderService
 from omniai.application.retrieval_service import RetrievalService
@@ -150,4 +151,21 @@ def get_retrieval_service(
         search_engine=search_engine,
         embedding_provider=provider,
         tenant_id=principal.tenant_id,
+    )
+
+
+def get_chat_service(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    secret_box: SecretBox = Depends(get_secret_box),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> ChatService:
+    return ChatService(
+        session=session,
+        settings=request.app.state.container.settings,
+        secret_box=secret_box,
+        retrieval_service=retrieval_service,
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
     )
