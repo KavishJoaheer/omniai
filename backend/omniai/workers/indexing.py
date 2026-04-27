@@ -3,9 +3,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import update
+
+from omniai.adapters.relational.sqlalchemy.models import ChunkRecord
 from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
 from omniai.adapters.relational.sqlalchemy.session import DatabaseManager
 from omniai.config.settings import Settings
+from omniai.domain.knowledge.models import Chunk
 from omniai.plugins.chunk_templates import ChunkTemplateRegistry
 from omniai.plugins.embedding_providers import build_embedding_provider
 from omniai.ports.object_store import ObjectStorePort
@@ -70,11 +74,30 @@ async def index_document(
             )
             return
 
-        chunks = store.replace_chunks(
+        all_chunks = store.replace_chunks(
             document_id=document_id,
-            chunks=[{"text": spec.text, "metadata": spec.metadata} for spec in chunk_specs],
+            chunks=[
+                {
+                    "text": spec.text,
+                    "metadata": spec.metadata,
+                    "is_indexable": spec.metadata.get("is_indexable", True),
+                }
+                for spec in chunk_specs
+            ],
             template_name=template.name,
         )
+
+        # For small-to-big templates, wire up parent_chunk_id on child chunks.
+        _link_parent_chunks(session, all_chunks)
+
+        # Reload chunks so parent_chunk_id values are fresh from the DB
+        all_chunks = store.list_chunks(document_id=document_id)
+
+        # Only embed + index chunks that are marked indexable (children, or all for flat templates)
+        indexable_chunks = [c for c in all_chunks if c.is_indexable]
+        if not indexable_chunks:
+            # All chunks are parents — fall back to indexing everything
+            indexable_chunks = all_chunks
 
         provider, model_name = build_embedding_provider(
             session=session,
@@ -83,7 +106,7 @@ async def index_document(
             requested_model=collection.embedding_model,
         )
         try:
-            vectors = await provider.embed(model=model_name, inputs=[c.text for c in chunks])
+            vectors = await provider.embed(model=model_name, inputs=[c.text for c in indexable_chunks])
         except Exception as exc:
             logger.exception("index_document: embedding failed for %s", document_id)
             store.update_status(
@@ -93,7 +116,7 @@ async def index_document(
             )
             return
 
-        if len(vectors) != len(chunks) or any(not v for v in vectors):
+        if len(vectors) != len(indexable_chunks) or any(not v for v in vectors):
             store.update_status(
                 document_id=document_id,
                 status="FAILED",
@@ -103,25 +126,26 @@ async def index_document(
 
         store.update_status(document_id=document_id, status="INDEXING")
 
-        indexable = [
+        to_index = [
             IndexableChunk(
-                chunk_id=chunks[i].id,
+                chunk_id=indexable_chunks[i].id,
                 document_id=document_id,
                 collection_id=document.collection_id,
-                text=chunks[i].text,
+                text=indexable_chunks[i].text,
                 vector=vectors[i],
                 metadata={
-                    **chunks[i].metadata,
-                    "ordinal": chunks[i].ordinal,
+                    **indexable_chunks[i].metadata,
+                    "ordinal": indexable_chunks[i].ordinal,
                     "document_name": document.name,
+                    "parent_chunk_id": indexable_chunks[i].parent_chunk_id or "",
                 },
             )
-            for i in range(len(chunks))
+            for i in range(len(indexable_chunks))
         ]
         search_engine.ensure_index(tenant_id=tenant_id, dim=len(vectors[0]))
         try:
             search_engine.delete_by_document(tenant_id=tenant_id, document_id=document_id)
-            search_engine.upsert_chunks(tenant_id=tenant_id, chunks=indexable)
+            search_engine.upsert_chunks(tenant_id=tenant_id, chunks=to_index)
         except Exception as exc:
             logger.exception("index_document: search engine write failed for %s", document_id)
             store.update_status(
@@ -138,4 +162,47 @@ async def index_document(
             page_count=document.page_count,
             parser_name=document.parser_name,
         )
-        logger.info("index_document: %s ready (%d chunks, model=%s)", document_id, len(chunks), model_name)
+        logger.info(
+            "index_document: %s ready (%d chunks, %d indexed, model=%s)",
+            document_id,
+            len(all_chunks),
+            len(indexable_chunks),
+            model_name,
+        )
+
+
+def _link_parent_chunks(session, all_chunks: list[Chunk]) -> None:
+    """For small-to-big templates, set parent_chunk_id on child chunks.
+
+    Parent chunks carry metadata['chunk_kind'] == 'parent' and metadata['parent_index'] = N.
+    Child chunks carry metadata['chunk_kind'] == 'child' and metadata['parent_index'] = N.
+    We look up parent chunks by parent_index and write the parent chunk's DB id into
+    the child's parent_chunk_id column.
+    """
+    has_hierarchy = any(c.metadata.get("chunk_kind") == "parent" for c in all_chunks)
+    if not has_hierarchy:
+        return
+
+    # Build parent_index -> chunk.id map for parent chunks
+    parent_id_by_index: dict[int, str] = {}
+    for chunk in all_chunks:
+        if chunk.metadata.get("chunk_kind") == "parent":
+            idx = chunk.metadata.get("parent_index")
+            if idx is not None:
+                parent_id_by_index[idx] = chunk.id
+
+    if not parent_id_by_index:
+        return
+
+    # Update child records in bulk
+    for chunk in all_chunks:
+        if chunk.metadata.get("chunk_kind") == "child":
+            parent_idx = chunk.metadata.get("parent_index")
+            parent_id = parent_id_by_index.get(parent_idx) if parent_idx is not None else None
+            if parent_id:
+                session.execute(
+                    update(ChunkRecord)
+                    .where(ChunkRecord.id == chunk.id)
+                    .values(parent_chunk_id=parent_id)
+                )
+    session.commit()

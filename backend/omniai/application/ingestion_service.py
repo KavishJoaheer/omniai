@@ -117,3 +117,26 @@ class IngestionService:
         if document.parsed_text_key is None:
             raise FileNotFoundError("Document has no parsed text yet.")
         return self._object_store.get_object(key=document.parsed_text_key).decode("utf-8")
+
+    def delete_document(self, *, document_id: str, search_engine=None) -> None:
+        document = self._store.get_document(document_id)
+
+        # Remove from search engine first
+        if search_engine is not None:
+            try:
+                search_engine.delete_by_document(
+                    tenant_id=self._tenant_id,
+                    document_id=document_id,
+                )
+            except Exception:
+                pass
+
+        # Remove stored objects
+        for key in (document.object_key, document.parsed_text_key):
+            if key:
+                try:
+                    self._object_store.delete_object(key=key)
+                except Exception:
+                    pass
+
+        self._store.delete_document(document_id=document_id)

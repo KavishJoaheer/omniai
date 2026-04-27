@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from omniai.plugins.chunk_templates.general import GeneralChunkTemplate
 from omniai.plugins.chunk_templates.qa import QaChunkTemplate
+from omniai.plugins.chunk_templates.small_to_big import SmallToBigChunkTemplate
 from omniai.ports.chunk_template import ChunkTemplatePort
 
 
@@ -26,4 +27,5 @@ def build_default_registry() -> ChunkTemplateRegistry:
     registry = ChunkTemplateRegistry()
     registry.register(GeneralChunkTemplate())
     registry.register(QaChunkTemplate())
+    registry.register(SmallToBigChunkTemplate())
     return registry

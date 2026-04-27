@@ -18,7 +18,7 @@ from omniai.application.retrieval_service import (
     RetrievalService,
 )
 from omniai.config.settings import Settings
-from omniai.plugins.llm_providers.factory import build_llm_provider
+from omniai.plugins.llm_providers.factory import build_llm_provider  # noqa: F401 (also used in _rewrite_query)
 from omniai.ports.llm_provider import LlmMessage
 from omniai.ports.search_engine import SearchHit
 from omniai.security.secrets import SecretBox
@@ -236,10 +236,14 @@ class ChatService:
         self._session.add(user_message)
         self._session.commit()
 
+        # For multi-turn: rewrite the query if there's prior history
+        history_for_rewrite = self._load_recent_history(conversation.id, limit=4)
+        search_query = await self._rewrite_query(user_text, history_for_rewrite)
+
         # Retrieve context
         retrieval_response = await self._retrieval.retrieve(
             RetrievalRequest(
-                query=user_text,
+                query=search_query,
                 top_k=eff_top_k,
                 vector_weight=eff_vector_weight,
                 collection_ids=eff_collections or None,
@@ -320,6 +324,49 @@ class ChatService:
         )
 
     # ---- Internal helpers ----------------------------------------------------
+
+    async def _rewrite_query(self, user_text: str, history: list[LlmMessage]) -> str:
+        """Rewrite a follow-up question into a standalone search query using the LLM.
+
+        Only rewrites when there is prior history — otherwise the user text is returned as-is.
+        Keeps it fast by using a small system prompt and limiting output tokens.
+        """
+        prior = [m for m in history if m.role in ("user", "assistant")]
+        if not prior:
+            return user_text
+
+        try:
+            provider, model = build_llm_provider(
+                session=self._session,
+                settings=self._settings,
+                secret_box=self._secret_box,
+                tenant_id=self._tenant_id,
+            )
+            rewrite_messages = [
+                LlmMessage(
+                    role="system",
+                    content=(
+                        "You are a query rewriter. Given a conversation history and a follow-up question, "
+                        "rewrite the follow-up question into a single, self-contained search query that captures "
+                        "the full intent. Output ONLY the rewritten query — no explanation, no quotes."
+                    ),
+                ),
+                *prior[-4:],
+                LlmMessage(
+                    role="user",
+                    content=f"Follow-up question: {user_text}\nRewritten standalone query:",
+                ),
+            ]
+            chunks: list[str] = []
+            async for chunk in provider.stream_chat(model=model, messages=rewrite_messages, temperature=0.0, max_tokens=80):
+                if chunk.delta:
+                    chunks.append(chunk.delta)
+                if chunk.finish_reason:
+                    break
+            rewritten = "".join(chunks).strip().strip('"').strip()
+            return rewritten if rewritten else user_text
+        except Exception:
+            return user_text
 
     def _summary(self, record: ConversationRecord) -> ConversationSummary:
         return ConversationSummary(

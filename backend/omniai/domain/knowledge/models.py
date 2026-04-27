@@ -35,6 +35,8 @@ class Chunk(BaseModel):
     token_count: int = 0
     template_name: str = "general"
     metadata: dict = Field(default_factory=dict)
+    parent_chunk_id: str | None = None
+    is_indexable: bool = True
     indexed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

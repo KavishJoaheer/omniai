@@ -225,6 +225,8 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
                 token_count=max(1, len(text.split())),
                 template_name=template_name,
                 metadata_json=json.dumps(metadata, separators=(",", ":"), sort_keys=True),
+                parent_chunk_id=chunk.get("parent_chunk_id"),
+                is_indexable=int(chunk.get("is_indexable", True)),
             )
             self._session.add(record)
             records.append(record)
@@ -232,6 +234,17 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
         for record in records:
             self._session.refresh(record)
         return [self._to_chunk(r) for r in records]
+
+    def get_chunk_by_id(self, chunk_id: str) -> Chunk:
+        record = self._session.scalar(
+            select(ChunkRecord).where(
+                ChunkRecord.id == chunk_id,
+                ChunkRecord.tenant_id == self._tenant_id,
+            )
+        )
+        if record is None:
+            raise KeyError("Chunk not found.")
+        return self._to_chunk(record)
 
     def list_chunks(self, *, document_id: str) -> list[Chunk]:
         statement = (
@@ -265,6 +278,19 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
         if record is None:
             raise KeyError("Document not found.")
         return record
+
+    def delete_document(self, *, document_id: str) -> None:
+        record = self._get_document_record(document_id)
+        # Chunks are deleted via cascade in DB; if not, delete explicitly
+        self._session.execute(delete(ChunkRecord).where(ChunkRecord.document_id == document_id))
+        # Update collection document count
+        collection = self._session.scalar(
+            select(CollectionRecord).where(CollectionRecord.id == record.collection_id)
+        )
+        if collection and collection.document_count > 0:
+            collection.document_count -= 1
+        self._session.delete(record)
+        self._session.commit()
 
     def count_collections(self) -> int:
         statement = select(func.count(CollectionRecord.id)).where(CollectionRecord.tenant_id == self._tenant_id)
@@ -305,6 +331,8 @@ class SqlAlchemyKnowledgeStore(KnowledgeStore):
             token_count=record.token_count,
             template_name=record.template_name,
             metadata=metadata,
+            parent_chunk_id=record.parent_chunk_id,
+            is_indexable=bool(record.is_indexable),
             indexed_at=record.indexed_at,
             created_at=record.created_at,
             updated_at=record.updated_at,

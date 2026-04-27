@@ -9,6 +9,7 @@ from omniai.interfaces.http.deps import (
     get_knowledge_service,
     get_metrics,
     get_object_store,
+    get_search_engine,
 )
 from omniai.interfaces.http.envelope import ok
 from omniai.observability.metrics import MetricsRegistry
@@ -143,3 +144,18 @@ def get_document_text(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ok({"text": text})
+
+
+@document_router.delete("/{document_id}")
+def delete_document(
+    document_id: str,
+    ingestion: IngestionService = Depends(get_ingestion_service),
+    search_engine=Depends(get_search_engine),
+    principal=Depends(get_current_principal),
+) -> dict:
+    assert_permission(principal.role, Perm.DOCUMENTS_WRITE)
+    try:
+        ingestion.delete_document(document_id=document_id, search_engine=search_engine)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return ok({"deleted": document_id})

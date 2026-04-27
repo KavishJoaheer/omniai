@@ -169,6 +169,8 @@ class ChunkRecord(TimestampMixin, Base):
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     template_name: Mapped[str] = mapped_column(String(64), default="general")
     metadata_json: Mapped[str] = mapped_column(Text(), default="{}")
+    parent_chunk_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    is_indexable: Mapped[int] = mapped_column(Integer, default=1)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
