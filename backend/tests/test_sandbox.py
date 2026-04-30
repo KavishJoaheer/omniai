@@ -148,19 +148,20 @@ def test_build_sandbox_subprocess():
     assert sb.name == "subprocess"
 
 
-def test_build_sandbox_docker_falls_back_to_subprocess(caplog):
-    """docker kind warns and falls back to SubprocessSandbox."""
+def test_build_sandbox_docker_returns_docker_backend(caplog):
+    """docker kind now returns the real DockerSandbox (M14)."""
     import logging
 
+    from omniai.plugins.sandbox.docker_sandbox import DockerSandbox
     from omniai.plugins.sandbox.factory import build_sandbox
 
     settings = _FakeSettings()
     settings.sandbox_kind = "docker"
-    with caplog.at_level(logging.WARNING, logger="omniai.plugins.sandbox.factory"):
+    with caplog.at_level(logging.INFO, logger="omniai.plugins.sandbox.factory"):
         sb = build_sandbox(settings)  # type: ignore[arg-type]
     assert sb is not None
-    assert sb.name == "subprocess"
-    assert any("docker" in r.message.lower() for r in caplog.records)
+    assert isinstance(sb, DockerSandbox)
+    assert sb.name == "docker"
 
 
 def test_build_sandbox_unknown_kind_returns_none(caplog):

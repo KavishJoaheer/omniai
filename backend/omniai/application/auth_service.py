@@ -146,12 +146,49 @@ class AuthService:
         return self._build_auth_result(principal, token)
 
     def login(self, payload: LoginInput) -> dict:
+        from datetime import datetime, timedelta, timezone as _tz
+
         email = self._normalize_email(payload.email)
         user = self._session.scalar(select(UserRecord).where(UserRecord.email == email))
+
+        # ── Lockout check ────────────────────────────────────────────────────
+        # Always guard against timing-based enumeration: check lockout *before*
+        # verifying the password so the response time is consistent regardless
+        # of whether the user exists.
+        if user is not None and user.locked_until is not None:
+            now = datetime.now(_tz.utc)
+            locked_ts = user.locked_until
+            if locked_ts.tzinfo is None:
+                locked_ts = locked_ts.replace(tzinfo=_tz.utc)
+            if locked_ts > now:
+                remaining = int((locked_ts - now).total_seconds() // 60) + 1
+                raise PermissionError(
+                    f"Account is temporarily locked. Try again in {remaining} minute(s)."
+                )
+            # Lock has expired — reset the counter so the account is usable again.
+            user.failed_login_attempts = 0
+            user.locked_until = None
+
+        # ── Credential verification ──────────────────────────────────────────
         if user is None or not verify_password(payload.password, user.password_hash):
+            # Increment failure counter for the found user (if any).
+            if user is not None:
+                user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+                threshold = self._settings.login_lockout_threshold
+                if user.failed_login_attempts >= threshold:
+                    from datetime import datetime as _dt, timedelta as _td, timezone as _tz2
+                    user.locked_until = _dt.now(_tz2.utc) + _td(
+                        minutes=self._settings.login_lockout_minutes
+                    )
+                self._session.commit()
             raise PermissionError("Invalid email or password.")
+
         if not bool(user.is_active):
             raise PermissionError("This user account is disabled.")
+
+        # ── Success: reset failure counter ───────────────────────────────────
+        user.failed_login_attempts = 0
+        user.locked_until = None
 
         membership = self._get_primary_membership(user.id, user.primary_tenant_id)
         tenant = self._get_tenant(membership.tenant_id)
@@ -461,15 +498,55 @@ class AuthService:
             for membership, user in self._session.execute(statement)
         ]
 
-    def list_audit_events(self, principal: AuthenticatedPrincipal) -> list[dict]:
+    def list_audit_events(
+        self,
+        principal: AuthenticatedPrincipal,
+        *,
+        limit: int = 50,
+        before_id: str | None = None,
+    ) -> dict:
+        """Return a page of audit events for the principal's tenant.
+
+        Pagination is cursor-based: pass the ``nextCursor`` value returned by
+        a previous call as ``before_id`` to fetch the next page.  Results are
+        always ordered newest-first (``created_at DESC, id DESC``).
+        """
         assert_permission(principal.role, Perm.AUDIT_READ)
-        statement = (
-            select(AuditEventRecord)
-            .where(AuditEventRecord.tenant_id == principal.tenant_id)
-            .order_by(AuditEventRecord.created_at.desc())
-            .limit(100)
+        limit = min(max(1, limit), 200)  # clamp 1–200
+
+        statement = select(AuditEventRecord).where(
+            AuditEventRecord.tenant_id == principal.tenant_id
         )
-        return [
+
+        if before_id:
+            # Keyset: fetch records whose (created_at, id) tuple is strictly
+            # before the anchor.  We need the anchor's created_at first.
+            anchor = self._session.scalar(
+                select(AuditEventRecord).where(AuditEventRecord.id == before_id)
+            )
+            if anchor is not None:
+                from sqlalchemy import or_, and_
+                statement = statement.where(
+                    or_(
+                        AuditEventRecord.created_at < anchor.created_at,
+                        and_(
+                            AuditEventRecord.created_at == anchor.created_at,
+                            AuditEventRecord.id < before_id,
+                        ),
+                    )
+                )
+
+        statement = (
+            statement
+            .order_by(AuditEventRecord.created_at.desc(), AuditEventRecord.id.desc())
+            .limit(limit + 1)  # fetch one extra to know if there's a next page
+        )
+
+        rows = list(self._session.scalars(statement))
+        has_more = len(rows) > limit
+        page = rows[:limit]
+
+        items = [
             {
                 "id": record.id,
                 "action": record.action,
@@ -479,8 +556,13 @@ class AuthService:
                 "actorUserId": record.actor_user_id,
                 "createdAt": record.created_at.isoformat(),
             }
-            for record in self._session.scalars(statement)
+            for record in page
         ]
+        return {
+            "items": items,
+            "nextCursor": page[-1].id if has_more and page else None,
+            "hasMore": has_more,
+        }
 
     def list_teams(self, principal: AuthenticatedPrincipal) -> list[dict]:
         statement = (

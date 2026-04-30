@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = Field(default=480, alias="SESSION_TTL_MINUTES")
     session_cookie_name: str = Field(default="omniai_session", alias="SESSION_COOKIE_NAME")
     registration_open: bool = Field(default=True, alias="REGISTRATION_OPEN")
+    login_lockout_threshold: int = Field(default=5, alias="LOGIN_LOCKOUT_THRESHOLD")
+    login_lockout_minutes: int = Field(default=15, alias="LOGIN_LOCKOUT_MINUTES")
 
     model_config = SettingsConfigDict(
         env_file=".env",

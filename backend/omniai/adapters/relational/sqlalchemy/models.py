@@ -101,6 +101,9 @@ class UserRecord(TimestampMixin, Base):
     # Password-reset flow
     reset_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     reset_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Account lockout (M14)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     primary_tenant: Mapped[TenantRecord] = relationship(back_populates="users")
     tenant_memberships: Mapped[list["TenantMembershipRecord"]] = relationship(back_populates="user")

@@ -268,6 +268,109 @@ issue if you need one as a hardened path.
 
 ## Security posture
 
+### Headers (M14)
+
+Every HTTP response from the API carries:
+
+| Header | Value |
+|--------|-------|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `Content-Security-Policy` | `default-src 'self'; …` (see `app.py`) |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains; preload` — **production only** (`APP_ENV=production`) |
+
+### Account lockout (M14)
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `LOGIN_LOCKOUT_THRESHOLD` | `5` | Failed attempts before the account is locked |
+| `LOGIN_LOCKOUT_MINUTES` | `15` | How long the lock lasts |
+
+After `LOGIN_LOCKOUT_THRESHOLD` consecutive bad passwords the account is
+locked for `LOGIN_LOCKOUT_MINUTES` minutes.  A successful login resets the
+counter immediately.  The API returns HTTP 403 with a human-readable message
+telling the user how many minutes remain.
+
+To **manually unlock** an account (e.g. legitimate user locked out):
+```sql
+UPDATE users
+SET failed_login_attempts = 0, locked_until = NULL
+WHERE email = 'user@example.com';
+```
+
+### Distributed connector scheduler lock (M14)
+
+The `ConnectorScheduler` uses a per-connector lock so multiple API replicas
+don't double-sync the same source simultaneously.
+
+- **Single process / single-host** — in-process `asyncio.Lock` (automatic,
+  no config needed).
+- **Multi-replica / Kubernetes** — set `REDIS_URL` to point at the shared
+  Redis.  The lock uses Redis `SET NX EX` with TTL = `sync_interval_seconds`,
+  so a crashed replica never blocks a connector for more than one interval.
+
+```yaml
+# values.yaml (Helm)
+api:
+  env:
+    REDIS_URL: "redis://redis-service:6379/0"
+```
+
+### Code execution sandbox (M14)
+
+| `SANDBOX_KIND` | Description |
+|----------------|-------------|
+| `none` (default) | Code-node endpoints return 503; no execution risk |
+| `subprocess` | Isolated child process; suitable for trusted/internal use |
+| `docker` | Full kernel-namespace isolation; **recommended for untrusted input** |
+
+Docker sandbox requirements:
+- Docker daemon must be running on the host.
+- The API container needs access to `/var/run/docker.sock` (add to Helm
+  `volumes` / `volumeMounts` or use a Docker-in-Docker sidecar).
+- Override the Python image with `SANDBOX_DOCKER_IMAGE` (default:
+  `python:3.11-slim`).
+
+```yaml
+# docker-compose.prod.yml snippet for socket access
+services:
+  api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      SANDBOX_KIND: docker
+      SANDBOX_DOCKER_IMAGE: python:3.11-slim
+```
+
+> ⚠️  Mounting the Docker socket grants the container the ability to manage
+> other containers on the host.  Use a dedicated `socat` proxy or a
+> socket-proxy sidecar (e.g. `tecnativa/docker-socket-proxy`) to restrict
+> the API surface exposed to the api container.
+
+### Audit log
+
+`GET /v1/admin/audit-events` supports cursor-based pagination (M14):
+
+```
+GET /v1/admin/audit-events?limit=50
+GET /v1/admin/audit-events?limit=50&before_id=<nextCursor>
+```
+
+The response envelope is:
+```json
+{
+  "data": {
+    "items": [...],
+    "nextCursor": "aud_abc123" | null,
+    "hasMore": true | false
+  }
+}
+```
+
+### Legacy security checklist
+
 - **All provider credentials encrypted at rest** with Fernet (AES-128-CBC +
   HMAC-SHA256), keyed off `ENCRYPTION_KEY`.
 - **Auth tokens** are JWTs signed with `AUTH_SECRET`. Rotate every 90 days.

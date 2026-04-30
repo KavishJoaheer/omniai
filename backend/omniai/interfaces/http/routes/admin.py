@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from omniai.application.auth_service import AuthService
 from omniai.interfaces.http.deps import get_auth_service, require_admin_principal
@@ -19,5 +19,7 @@ def list_users(
 def list_audit_events(
     principal=Depends(require_admin_principal),
     auth_service: AuthService = Depends(get_auth_service),
+    limit: int = Query(default=50, ge=1, le=200, description="Max events per page"),
+    before_id: str | None = Query(default=None, description="Cursor: last event ID from previous page"),
 ) -> dict:
-    return ok(auth_service.list_audit_events(principal))
+    return ok(auth_service.list_audit_events(principal, limit=limit, before_id=before_id))

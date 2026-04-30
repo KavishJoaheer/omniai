@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import AsyncIterator
 
 from omniai.application.ingestion_service import IngestionService
 from omniai.connectors.base import ConnectorAdapter, hash_content
@@ -13,6 +15,76 @@ from omniai.domain.connectors.models import Connector, ConnectorSyncReport
 from omniai.ports.connectors import ConnectorStorePort
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Distributed / in-process sync lock
+# ---------------------------------------------------------------------------
+
+class _InProcessSyncLock:
+    """Per-connector asyncio.Lock that prevents double-sync within a single
+    process.  Thread-safe because asyncio runs in one event loop."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    @asynccontextmanager
+    async def acquire(self, connector_id: str, *, ttl_seconds: int = 300) -> AsyncIterator[bool]:
+        """Yield ``True`` if the lock was acquired, ``False`` if already held."""
+        lock = self._locks.setdefault(connector_id, asyncio.Lock())
+        if lock.locked():
+            yield False
+            return
+        async with lock:
+            yield True
+
+
+class _RedisSyncLock:
+    """Distributed connector lock backed by Redis SETNX.
+
+    Uses a single SET key=1 NX EX <ttl> call.  If the key already exists
+    (another replica holds the lock) we skip the connector.  The key expires
+    automatically so a crashed worker never blocks indefinitely.
+    """
+
+    def __init__(self, redis_url: str) -> None:
+        self._redis_url = redis_url
+        self._redis = None  # lazy-init
+
+    def _get_redis(self):
+        if self._redis is None:
+            try:
+                import redis.asyncio as aioredis  # type: ignore[import-untyped]
+                self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
+            except ImportError:
+                raise RuntimeError(
+                    "redis package is required for distributed connector locking. "
+                    "Install it with: pip install redis"
+                )
+        return self._redis
+
+    @asynccontextmanager
+    async def acquire(self, connector_id: str, *, ttl_seconds: int = 300) -> AsyncIterator[bool]:
+        key = f"omniai:connector_lock:{connector_id}"
+        redis = self._get_redis()
+        acquired: bool = await redis.set(key, "1", nx=True, ex=ttl_seconds)
+        if not acquired:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass  # TTL will clean it up
+
+
+def build_sync_lock(redis_url: str | None):
+    """Return a _RedisSyncLock if Redis is configured, else in-process lock."""
+    if redis_url:
+        return _RedisSyncLock(redis_url)
+    return _InProcessSyncLock()
 
 
 def _build_adapter(kind: str) -> ConnectorAdapter:
@@ -151,6 +223,11 @@ class ConnectorScheduler:
 
     Uses a separate database session per tick; never holds a request-scoped
     session. Safe to start at app boot and stop at shutdown.
+
+    With ``sync_lock`` (a ``_RedisSyncLock`` or ``_InProcessSyncLock``), two
+    API replicas that both run the scheduler will not double-sync the same
+    connector: only the replica that acquires the lock will sync; the other
+    skips that connector and tries again on the next tick.
     """
 
     def __init__(
@@ -162,6 +239,7 @@ class ConnectorScheduler:
         parsers,
         upload_max_bytes: int,
         tick_seconds: float = 30.0,
+        sync_lock=None,  # _InProcessSyncLock | _RedisSyncLock | None
     ) -> None:
         self._database = database
         self._object_store = object_store
@@ -169,6 +247,7 @@ class ConnectorScheduler:
         self._parsers = parsers
         self._upload_max_bytes = upload_max_bytes
         self._tick_seconds = tick_seconds
+        self._sync_lock = sync_lock or _InProcessSyncLock()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -215,27 +294,36 @@ class ConnectorScheduler:
                 elapsed = (now - connector.last_sync_at.replace(tzinfo=timezone.utc)).total_seconds()
                 if elapsed < connector.sync_interval_seconds:
                     continue
-            try:
-                with self._database.new_session() as session:
-                    knowledge_store = KnowledgeStore(session, tenant_id)
-                    ingestion = IngestionService(
-                        store=knowledge_store,
-                        object_store=self._object_store,
-                        queue=self._queue,
-                        parsers=self._parsers,
-                        tenant_id=tenant_id,
-                        max_bytes=self._upload_max_bytes,
-                    )
-                    connector_store = ConnectorStore(session, tenant_id)
-                    service = ConnectorService(
-                        store=connector_store,
-                        ingestion=ingestion,
-                        tenant_id=tenant_id,
-                    )
-                    report = await service.sync(connector.id)
-                    logger.info(
-                        "connector %s synced: ingested=%d skipped=%d errors=%d",
-                        connector.id, report.ingested, report.skipped_duplicate, len(report.errors),
-                    )
-            except Exception:
-                logger.exception("connector %s scheduler error", connector.id)
+            # Acquire a distributed lock so multi-replica deployments don't
+            # double-sync the same connector at the same time.
+            async with self._sync_lock.acquire(
+                connector.id,
+                ttl_seconds=max(int(connector.sync_interval_seconds), 60),
+            ) as acquired:
+                if not acquired:
+                    logger.debug("connector %s: lock held by another replica, skipping", connector.id)
+                    continue
+                try:
+                    with self._database.new_session() as session:
+                        knowledge_store = KnowledgeStore(session, tenant_id)
+                        ingestion = IngestionService(
+                            store=knowledge_store,
+                            object_store=self._object_store,
+                            queue=self._queue,
+                            parsers=self._parsers,
+                            tenant_id=tenant_id,
+                            max_bytes=self._upload_max_bytes,
+                        )
+                        connector_store = ConnectorStore(session, tenant_id)
+                        service = ConnectorService(
+                            store=connector_store,
+                            ingestion=ingestion,
+                            tenant_id=tenant_id,
+                        )
+                        report = await service.sync(connector.id)
+                        logger.info(
+                            "connector %s synced: ingested=%d skipped=%d errors=%d",
+                            connector.id, report.ingested, report.skipped_duplicate, len(report.errors),
+                        )
+                except Exception:
+                    logger.exception("connector %s scheduler error", connector.id)

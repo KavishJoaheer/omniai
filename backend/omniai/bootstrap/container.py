@@ -9,7 +9,7 @@ from omniai.adapters.relational.sqlalchemy.repositories import ensure_tenant
 from omniai.adapters.relational.sqlalchemy.session import DatabaseManager
 from omniai.adapters.search.factory import build_search_engine
 from omniai.application.auth_service import AuthService
-from omniai.application.connector_service import ConnectorScheduler
+from omniai.application.connector_service import ConnectorScheduler, build_sync_lock
 from omniai.application.ingestion_service import PARSE_JOB_NAME
 from omniai.application.provider_service import seed_default_providers
 from omniai.config.settings import Settings
@@ -130,6 +130,7 @@ def build_container(settings: Settings) -> Container:
             ollama_base_url=settings.ollama_base_url,
         )
 
+    sync_lock = build_sync_lock(settings.redis_url)
     connector_scheduler = ConnectorScheduler(
         database=database,
         object_store=object_store,
@@ -137,6 +138,7 @@ def build_container(settings: Settings) -> Container:
         parsers=parsers,
         upload_max_bytes=settings.upload_max_bytes,
         tick_seconds=30.0,
+        sync_lock=sync_lock,
     )
 
     return Container(

@@ -60,6 +60,35 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ── Security headers ─────────────────────────────────────────────────────
+    # Injected on every response.  HSTS is only sent in production so local
+    # dev tooling that talks over plain HTTP doesn't get stuck in a loop.
+    _is_prod = settings.app_env.lower() in ("production", "prod")
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # CSP: allow inline styles/scripts so the bundled SPA still works, but
+        # lock down everything else.  Tighten further once the frontend ships
+        # a nonce-based setup.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'"
+        )
+        if _is_prod:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains; preload"
+            )
+        return response
+
     _exempt_paths = ("/v1/health", "/v1/metrics", "/docs", "/openapi.json", "/c/")
 
     @app.middleware("http")
