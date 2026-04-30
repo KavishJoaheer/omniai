@@ -376,6 +376,11 @@ class ChatService:
 
         full_text = "".join(accumulated).strip()
 
+        # Estimate token usage (chars / 4 ≈ tokens; good enough for cost tracking)
+        prompt_chars = sum(len(m.content) for m in prompt_messages)
+        prompt_tokens_est = max(1, prompt_chars // 4)
+        completion_tokens_est = max(1, len(full_text) // 4)
+
         # Persist the assistant message
         assistant_message = MessageRecord(
             tenant_id=self._tenant_id,
@@ -388,6 +393,8 @@ class ChatService:
                     "model": resolved_model,
                     "provider": provider.kind,
                     "finish_reason": finish_reason,
+                    "prompt_tokens": prompt_tokens_est,
+                    "completion_tokens": completion_tokens_est,
                 }
             ),
         )
@@ -395,6 +402,21 @@ class ChatService:
         # Refresh updated_at on the conversation
         conversation.updated_at = utc_now()
         self._session.commit()
+
+        # Record token usage for cost tracking (M16) — fire-and-forget
+        try:
+            from omniai.application.observability_service import ObservabilityService
+            ObservabilityService(self._session, self._settings).record_token_usage(
+                tenant_id=self._tenant_id,
+                user_id=self._user_id,
+                conversation_id=conversation.id,
+                model_provider=provider.kind,
+                model_name=resolved_model,
+                prompt_tokens=prompt_tokens_est,
+                completion_tokens=completion_tokens_est,
+            )
+        except Exception:
+            logger.debug("token usage recording failed (non-fatal)", exc_info=True)
 
         yield ChatStreamEvent(
             kind="done",

@@ -190,6 +190,26 @@ class AuthService:
         user.failed_login_attempts = 0
         user.locked_until = None
 
+        # ── MFA challenge ────────────────────────────────────────────────────
+        if bool(user.mfa_enabled):
+            # Issue a short-lived MFA challenge token instead of a full session.
+            # The client presents this token to POST /v1/auth/mfa/verify.
+            mfa_challenge = create_session_token(
+                {
+                    "sub": user.id,
+                    "tenant_id": user.primary_tenant_id,
+                    "role": "_mfa_challenge",  # unprivileged sentinel role
+                    "exp": int(time.time()) + 300,  # 5 minutes
+                    "jti": generate_jti(),
+                },
+                self._settings.auth_secret,
+            )
+            self._session.commit()
+            return {
+                "mfaRequired": True,
+                "mfaChallengeToken": mfa_challenge,
+            }
+
         membership = self._get_primary_membership(user.id, user.primary_tenant_id)
         tenant = self._get_tenant(membership.tenant_id)
         principal = self._build_principal(user, tenant, membership.role, auth_type="session")
@@ -198,6 +218,42 @@ class AuthService:
             tenant_id=principal.tenant_id,
             actor_user_id=principal.user_id,
             action="auth.login",
+            target_type="user",
+            target_id=principal.user_id,
+            detail={"auth_type": "session"},
+            commit=True,
+        )
+        return self._build_auth_result(principal, token)
+
+    def mfa_verify(self, challenge_token: str, code: str) -> dict:
+        """Exchange an MFA challenge token for a full session token.
+
+        Called after a successful password check when the account has MFA
+        enabled.  ``challenge_token`` is the short-lived token returned by
+        ``login`` with ``mfaRequired=True``.
+        """
+        payload = verify_session_token(challenge_token, self._settings.auth_secret)
+        if payload.get("role") != "_mfa_challenge":
+            raise PermissionError("Invalid MFA challenge token.")
+
+        user = self._session.scalar(select(UserRecord).where(UserRecord.id == payload["sub"]))
+        if user is None or not bool(user.is_active):
+            raise PermissionError("User not available.")
+
+        # Delegate actual TOTP / recovery-code verification to IdentityService
+        from omniai.application.identity_service import IdentityService
+        id_svc = IdentityService(self._session, self._settings)
+        if not id_svc.verify_totp_or_recovery(user, code):
+            raise PermissionError("Invalid MFA code.")
+
+        membership = self._get_primary_membership(user.id, payload["tenant_id"])
+        tenant = self._get_tenant(membership.tenant_id)
+        principal = self._build_principal(user, tenant, membership.role, auth_type="session")
+        token = self.issue_session_token(principal)
+        self._record_audit_event(
+            tenant_id=principal.tenant_id,
+            actor_user_id=principal.user_id,
+            action="auth.mfa_verify",
             target_type="user",
             target_id=principal.user_id,
             detail={"auth_type": "session"},

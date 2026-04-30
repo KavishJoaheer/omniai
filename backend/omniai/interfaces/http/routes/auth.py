@@ -56,6 +56,11 @@ def login(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
+    # When MFA is enabled the service returns a challenge token instead of a
+    # full session — skip cookie-setting in that case.
+    if result.get("mfaRequired"):
+        return ok(result)
+
     response.set_cookie(
         key=auth_service._settings.session_cookie_name,
         value=result["accessToken"],

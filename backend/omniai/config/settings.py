@@ -66,6 +66,24 @@ class Settings(BaseSettings):
     registration_open: bool = Field(default=True, alias="REGISTRATION_OPEN")
     login_lockout_threshold: int = Field(default=5, alias="LOGIN_LOCKOUT_THRESHOLD")
     login_lockout_minutes: int = Field(default=15, alias="LOGIN_LOCKOUT_MINUTES")
+    # M15 — invitations
+    invitation_expiry_hours: int = Field(default=72, alias="INVITATION_EXPIRY_HOURS")
+    # M15 — OIDC / social login (per-provider; accessed via helpers below)
+    google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str | None = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
+    github_client_id: str | None = Field(default=None, alias="GITHUB_CLIENT_ID")
+    github_client_secret: str | None = Field(default=None, alias="GITHUB_CLIENT_SECRET")
+    microsoft_client_id: str | None = Field(default=None, alias="MICROSOFT_CLIENT_ID")
+    microsoft_client_secret: str | None = Field(default=None, alias="MICROSOFT_CLIENT_SECRET")
+    # M16 — OpenTelemetry
+    otel_exporter_otlp_endpoint: str | None = Field(default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT")
+    otel_service_name: str = Field(default="omniai-api", alias="OTEL_SERVICE_NAME")
+    # M16 — Sentry
+    sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")
+    sentry_traces_sample_rate: float = Field(default=0.1, alias="SENTRY_TRACES_SAMPLE_RATE")
+    # M16 — cost tracking (price per 1k tokens in USD)
+    llm_cost_per_1k_prompt: float = Field(default=0.002, alias="LLM_COST_PER_1K_PROMPT")
+    llm_cost_per_1k_completion: float = Field(default=0.006, alias="LLM_COST_PER_1K_COMPLETION")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -77,6 +95,12 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]
+
+    def oidc_client_id(self, provider: str) -> str | None:
+        return getattr(self, f"{provider.lower()}_client_id", None)
+
+    def oidc_client_secret(self, provider: str) -> str | None:
+        return getattr(self, f"{provider.lower()}_client_secret", None)
 
 
 @lru_cache(maxsize=1)

@@ -24,14 +24,28 @@ from omniai.interfaces.http.routes.documents import (
 )
 from omniai.interfaces.http.routes.providers import router as providers_router
 from omniai.interfaces.http.routes.retrieval import router as retrieval_router
+from omniai.interfaces.http.routes.identity import (
+    invitations_router,
+    mfa_router,
+    oidc_router,
+)
+from omniai.interfaces.http.routes.observability import router as observability_router
 from omniai.interfaces.http.routes.system import router as system_router
 from omniai.interfaces.http.routes.teams import router as teams_router
 from omniai.interfaces.http.routes.tenants import router as tenants_router
 from omniai.observability.rate_limit import TokenBucketLimiter
+from omniai.observability.sentry_setup import configure_sentry
+from omniai.observability.tracing import configure_tracing, instrument_app
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    # M16: Configure OTel tracing + Sentry before the app object is created
+    # so SQLAlchemy engine instrumentation fires before any engine is built.
+    configure_tracing(settings)
+    configure_sentry(settings)
+
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
@@ -149,6 +163,12 @@ def create_app() -> FastAPI:
     app.include_router(deployments_admin_router)
     app.include_router(deployments_public_router)
     app.include_router(sandbox_router)
+    # M15 — Identity & Access
+    app.include_router(mfa_router)
+    app.include_router(invitations_router)
+    app.include_router(oidc_router)
+    # M16 — Observability & Cost
+    app.include_router(observability_router)
 
     @app.on_event("startup")
     async def _start_connector_scheduler() -> None:
@@ -163,5 +183,8 @@ def create_app() -> FastAPI:
         from omniai.adapters.search.in_memory import InMemorySearchEngine as _InMem
         if isinstance(container.search_engine, _InMem):
             container.search_engine.save_snapshot()
+
+    # M16: Attach FastAPI OTel instrumentation AFTER all routes are registered
+    instrument_app(app)
 
     return app

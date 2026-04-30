@@ -104,6 +104,10 @@ class UserRecord(TimestampMixin, Base):
     # Account lockout (M14)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # TOTP MFA (M15)
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_enabled: Mapped[int] = mapped_column(Integer, default=0)
+    mfa_recovery_codes_json: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
     primary_tenant: Mapped[TenantRecord] = relationship(back_populates="users")
     tenant_memberships: Mapped[list["TenantMembershipRecord"]] = relationship(back_populates="user")
@@ -355,6 +359,62 @@ class MessageRecord(Base):
     content: Mapped[str] = mapped_column(Text(), default="")
     citations_json: Mapped[str] = mapped_column(Text(), default="[]")
     usage_json: Mapped[str] = mapped_column(Text(), default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class InvitationRecord(Base):
+    """One-time invite link that creates a user + tenant membership on acceptance."""
+    __tablename__ = "invitations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_prefixed_id("inv"))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    invited_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="MEMBER")
+    token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OIDCStateRecord(Base):
+    """Short-lived CSRF nonce for OAuth2/OIDC authorization_code flow."""
+    __tablename__ = "oidc_states"
+
+    state: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    redirect_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class TokenUsageRecord(Base):
+    """Per-request LLM token consumption for cost tracking (M16)."""
+    __tablename__ = "token_usage"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_prefixed_id("tok"))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class RetrievalFeedbackRecord(Base):
+    """Per-chunk relevance signal for NDCG / quality tracking (M16)."""
+    __tablename__ = "retrieval_feedback"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_prefixed_id("rfb"))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    query_hash: Mapped[str] = mapped_column(String(64), index=True)
+    chunk_id: Mapped[str] = mapped_column(String(32))
+    rank: Mapped[int] = mapped_column(Integer)
+    relevant: Mapped[int] = mapped_column(Integer)  # 1 = relevant, 0 = not
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

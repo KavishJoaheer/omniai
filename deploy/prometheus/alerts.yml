@@ -1,0 +1,114 @@
+groups:
+  # ──────────────────────────────────────────────────────────────────────────
+  # API availability & latency
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: omniai_api
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(omniai_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(omniai_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Omni-AI API error rate > 5%"
+          description: "{{ $value | humanizePercentage }} of requests are returning 5xx."
+
+      - alert: HighP99Latency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(omniai_http_request_duration_seconds_bucket[5m])) by (le, path)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency > 5 s on {{ $labels.path }}"
+          description: "99th-percentile latency is {{ $value | humanizeDuration }}."
+
+      - alert: ApiDown
+        expr: up{job="omniai-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Omni-AI API is down"
+          description: "The API pod has not been scraped for 2 minutes."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Rate limiting
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: omniai_rate_limit
+    rules:
+      - alert: HighRateLimitHits
+        expr: |
+          sum(rate(omniai_rate_limited_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limiter firing > 10 req/s"
+          description: "Consider raising RATE_LIMIT_PER_MINUTE or investigating abuse."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Ingestion pipeline
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: omniai_ingestion
+    rules:
+      - alert: IngestionFailureSpike
+        expr: |
+          sum(rate(omniai_documents_indexed_total{status="error"}[10m]))
+          /
+          (sum(rate(omniai_documents_indexed_total[10m])) + 0.001) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Document ingestion failure rate > 20%"
+          description: "{{ $value | humanizePercentage }} of indexing attempts failed."
+
+      - alert: WorkerQueueDepth
+        # arq exposes queue depth via Redis LIST length; exposed as gauge by
+        # an optional arq-prometheus exporter.  Adjust metric name if needed.
+        expr: arq_queue_jobs_total{queue="omniai"} > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingestion queue depth > 500 jobs"
+          description: "Queue depth is {{ $value }}. Worker may be down or overloaded."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Retrieval quality (requires feedback data; alert when NDCG degrades)
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: omniai_retrieval
+    rules:
+      - alert: LowRetrievalHitRate
+        expr: omniai_retrieval_hit_rate < 0.6
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Retrieval hit-rate dropped below 60%"
+          description: >
+            Users are not finding relevant results.  Consider reindexing,
+            rechecking embedding models, or reviewing recent document ingestion.
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Chat
+  # ──────────────────────────────────────────────────────────────────────────
+  - name: omniai_chat
+    rules:
+      - alert: HighChatErrorRate
+        expr: |
+          sum(rate(omniai_chat_messages_total{status="error"}[10m]))
+          /
+          (sum(rate(omniai_chat_messages_total[10m])) + 0.001) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chat error rate > 10%"
+          description: "LLM provider may be misconfigured or unreachable."
