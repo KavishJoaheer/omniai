@@ -24,6 +24,7 @@ def _set_test_env() -> Iterator[None]:
     os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "test@local.dev"
     os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "TestPassword123!"
     os.environ["RERANKER_KIND"] = "paired"  # avoid heavy cross-encoder load in tests
+    os.environ["SANDBOX_KIND"] = "subprocess"  # enable code-execution endpoints in tests
     os.environ["TENANT_MAX_DOCUMENTS"] = "100"
     os.environ["RATE_LIMIT_PER_MINUTE"] = "1000"  # don't trip in tests
     # clear settings cache so the new env is read

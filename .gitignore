@@ -30,3 +30,11 @@ omniai_industry_grade_report.pdf
 # Coverage outputs
 backend/coverage.xml
 htmlcov/
+
+# Worktree manager state (Claude Code / claire)
+.claude/worktrees/
+.claire/
+
+# Local runtime data
+data/
+backend/data/
