@@ -1,0 +1,54 @@
+# Rendered by nginx's `envsubst` mechanism via the official nginx:alpine image.
+# Variables: ${NGINX_PORT}, ${BACKEND_URL}
+
+server {
+    listen ${NGINX_PORT} default_server;
+    listen [::]:${NGINX_PORT} default_server;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Allow large file uploads (matches backend UPLOAD_MAX_BYTES=100MB default).
+    client_max_body_size 110m;
+
+    # Don't cache index.html — content hashes on bundles handle the rest.
+    location = /index.html {
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+    }
+
+    # Long-lived caching for hashed assets
+    location ~* \.(js|css|woff2?|png|jpg|jpeg|gif|svg|ico)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # Lightweight liveness probe used by docker HEALTHCHECK / k8s readinessProbe
+    location = /healthz {
+        access_log off;
+        return 200 'ok';
+        add_header Content-Type text/plain;
+    }
+
+    # Proxy API traffic to the backend service.
+    location /v1/ {
+        proxy_pass ${BACKEND_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE: keep connection open and don't buffer.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
+    # SPA: hand off any unmatched route to React Router
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

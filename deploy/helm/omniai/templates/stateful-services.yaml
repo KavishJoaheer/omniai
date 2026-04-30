@@ -1,0 +1,240 @@
+{{/*
+Bundled stateful services: Postgres, Redis, MinIO, OpenSearch.
+Each is wrapped in {{ if .Values.<svc>.enabled }} so an operator can opt out
+and point the chart at an external managed service via values overrides.
+*/}}
+
+{{- if .Values.postgres.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omniai.fullname" . }}-postgres
+  labels: {{- include "omniai.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "omniai.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omniai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "omniai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omniai.fullname" . }}-secret
+                  key: postgresPassword
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports: [{ name: postgres, containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "{{ .Values.postgres.user }}", "-d", "{{ .Values.postgres.database }}"] }
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "{{ .Values.postgres.user }}", "-d", "{{ .Values.postgres.database }}"] }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.postgres.storage.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.postgres.storage.size | quote }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omniai.fullname" . }}-postgres
+spec:
+  clusterIP: None
+  ports: [{ port: 5432, targetPort: postgres }]
+  selector:
+    {{- include "omniai.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+{{- end }}
+
+{{- if .Values.redis.enabled }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omniai.fullname" . }}-redis
+  labels: {{- include "omniai.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "omniai.fullname" . }}-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omniai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "omniai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          args: ["redis-server", "--appendonly", "yes"]
+          ports: [{ name: redis, containerPort: 6379 }]
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 5
+          volumeMounts: [{ name: data, mountPath: /data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.redis.storage.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.redis.storage.size | quote }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omniai.fullname" . }}-redis
+spec:
+  clusterIP: None
+  ports: [{ port: 6379, targetPort: redis }]
+  selector:
+    {{- include "omniai.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+{{- end }}
+
+{{- if .Values.minio.enabled }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omniai.fullname" . }}-minio
+  labels: {{- include "omniai.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "omniai.fullname" . }}-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omniai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        {{- include "omniai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+        - name: minio
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.rootUser | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omniai.fullname" . }}-secret
+                  key: minioPassword
+          ports:
+            - { name: api,     containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          readinessProbe:
+            httpGet: { path: /minio/health/live, port: api }
+            periodSeconds: 5
+          volumeMounts: [{ name: data, mountPath: /data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.minio.storage.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.minio.storage.size | quote }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omniai.fullname" . }}-minio
+spec:
+  ports:
+    - { name: api, port: 9000, targetPort: api }
+    - { name: console, port: 9001, targetPort: console }
+  selector:
+    {{- include "omniai.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+{{- end }}
+
+{{- if .Values.opensearch.enabled }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omniai.fullname" . }}-opensearch
+  labels: {{- include "omniai.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "omniai.fullname" . }}-opensearch
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omniai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: opensearch
+  template:
+    metadata:
+      labels:
+        {{- include "omniai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: opensearch
+    spec:
+      initContainers:
+        - name: sysctl
+          image: busybox:1.36
+          command: ["sh", "-c", "sysctl -w vm.max_map_count=262144"]
+          securityContext: { privileged: true }
+      containers:
+        - name: opensearch
+          image: "{{ .Values.opensearch.image.repository }}:{{ .Values.opensearch.image.tag }}"
+          env:
+            - { name: discovery.type, value: single-node }
+            - { name: OPENSEARCH_JAVA_OPTS, value: "-Xms{{ .Values.opensearch.heap }} -Xmx{{ .Values.opensearch.heap }}" }
+            - { name: DISABLE_SECURITY_PLUGIN, value: "true" }
+            - { name: DISABLE_INSTALL_DEMO_CONFIG, value: "true" }
+          ports: [{ name: http, containerPort: 9200 }]
+          readinessProbe:
+            httpGet: { path: /_cluster/health, port: http }
+            periodSeconds: 10
+          volumeMounts: [{ name: data, mountPath: /usr/share/opensearch/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.opensearch.storage.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.opensearch.storage.size | quote }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omniai.fullname" . }}-opensearch
+spec:
+  ports: [{ port: 9200, targetPort: http }]
+  selector:
+    {{- include "omniai.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: opensearch
+{{- end }}

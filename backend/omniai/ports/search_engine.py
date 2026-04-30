@@ -41,4 +41,5 @@ class SearchEnginePort(Protocol):
         top_k: int,
         vector_weight: float,
         collection_ids: list[str] | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[SearchHit]: ...

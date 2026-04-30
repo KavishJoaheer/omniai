@@ -1,0 +1,183 @@
+# Production-grade docker-compose for self-hosted deployments.
+#
+# Usage:
+#   1. Copy deploy/compose/.env.prod.example to deploy/compose/.env.prod
+#   2. Edit .env.prod — set strong ENCRYPTION_KEY, AUTH_SECRET, POSTGRES_PASSWORD,
+#      MINIO secrets, BOOTSTRAP_ADMIN_PASSWORD.
+#   3. From repo root:
+#      docker compose -f deploy/compose/docker-compose.prod.yml --env-file deploy/compose/.env.prod up -d --build
+#
+# This stack runs:
+#   - postgres (durable volume)
+#   - redis (queue backend)
+#   - minio (object store, 9001 console exposed only on loopback)
+#   - opensearch (vector + text search)
+#   - api (FastAPI, multi-replica safe behind a reverse proxy)
+#   - worker (arq) — scale with: docker compose ... up -d --scale worker=3
+#   - frontend (nginx serving the SPA + proxying /v1 to api)
+#
+# Healthchecks gate dependencies. All services restart unless explicitly stopped.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-omniai}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB:-omniai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    # Postgres should never be exposed publicly. Bind to loopback only for
+    # operator-side tooling. Remove this section for an internal-only service.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    ports:
+      # Console: loopback only for operators to inspect via SSH tunnel.
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms${OPENSEARCH_HEAP:-1g} -Xmx${OPENSEARCH_HEAP:-1g}"
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: omniai-backend:latest
+    restart: unless-stopped
+    environment: &backend_env
+      OMNIAI_ROLE: api
+      APP_ENV: production
+      HTTP_PORT: 9380
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-https://app.example.com}
+      DB_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-omniai}
+      REDIS_URL: redis://redis:6379/0
+      OBJECT_STORE_KIND: s3
+      OBJECT_STORE_ENDPOINT: http://minio:9000
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION:-us-east-1}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-omniai}
+      SEARCH_KIND: opensearch
+      SEARCH_URL: http://opensearch:9200
+      RERANKER_KIND: ${RERANKER_KIND:-paired}
+      RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
+      OCR_KIND: ${OCR_KIND:-none}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-llava}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      AUTH_SECRET: ${AUTH_SECRET}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
+      TENANT_MAX_DOCUMENTS: ${TENANT_MAX_DOCUMENTS:-10000}
+      TENANT_MAX_STORAGE_BYTES: ${TENANT_MAX_STORAGE_BYTES:-53687091200}
+      AUTO_CREATE_SCHEMA: "false"   # use alembic migrations in prod
+    extra_hosts:
+      # Lets the container reach Ollama running on the host for self-hosted LLMs.
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      minio:    { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+    expose:
+      - "9380"
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+
+  worker:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: omniai-backend:latest
+    restart: unless-stopped
+    command: []
+    environment:
+      <<: *backend_env
+      OMNIAI_ROLE: worker
+    depends_on:
+      api:      { condition: service_started }
+      redis:    { condition: service_healthy }
+      minio:    { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          memory: 2000M
+      # Scale with `--scale worker=N` on the up command. Each worker pulls
+      # jobs independently from the shared Redis queue.
+      replicas: ${WORKER_REPLICAS:-1}
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/}
+    image: omniai-frontend:latest
+    restart: unless-stopped
+    environment:
+      NGINX_PORT: 8080
+      BACKEND_URL: http://api:9380
+    ports:
+      - "${FRONTEND_PORT:-8080}:8080"
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  opensearch-data:

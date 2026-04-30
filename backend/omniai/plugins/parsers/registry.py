@@ -36,11 +36,17 @@ class ParserRegistry:
         return self._by_ext.get(ext)
 
 
-def build_default_registry() -> ParserRegistry:
+def build_default_registry(*, ocr_backend=None, ocr_min_chars_per_page: int = 50, ocr_image_dpi: int = 200) -> ParserRegistry:
     registry = ParserRegistry()
     registry.register(PlainTextParser())
     registry.register(CsvParser())
     registry.register(HtmlParser())
-    registry.register(PdfParser())
+    registry.register(
+        PdfParser(
+            ocr_backend=ocr_backend,
+            ocr_min_chars_per_page=ocr_min_chars_per_page,
+            ocr_image_dpi=ocr_image_dpi,
+        )
+    )
     registry.register(DocxParser())
     return registry

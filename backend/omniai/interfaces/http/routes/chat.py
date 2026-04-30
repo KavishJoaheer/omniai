@@ -19,8 +19,24 @@ class ConversationOut(BaseModel):
     model_provider: str | None
     model_name: str | None
     collection_ids: list[str]
+    pinned: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class UpdateConversationRequest(BaseModel):
+    title: str | None = None
+    pinned: bool | None = None
+    system_prompt: str | None = None
+    model_provider: str | None = None
+    model_name: str | None = None
+
+
+class RegenerateRequest(BaseModel):
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    model_provider: str | None = None
+    model_name: str | None = None
+    rerank: bool = True
 
 
 class CreateConversationRequest(BaseModel):
@@ -46,12 +62,14 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str
     collection_ids: list[str] | None = None
+    document_ids: list[str] | None = None
     top_k: int | None = Field(default=None, ge=1, le=50)
     vector_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     model_provider: str | None = None
     model_name: str | None = None
     system_prompt: str | None = None
+    rerank: bool = True
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -64,6 +82,7 @@ def list_conversations(chat_service: ChatService = Depends(get_chat_service)) ->
             model_provider=s.model_provider,
             model_name=s.model_name,
             collection_ids=s.collection_ids,
+            pinned=s.pinned,
             created_at=s.created_at,
             updated_at=s.updated_at,
         )
@@ -93,8 +112,92 @@ def create_conversation(
         model_provider=summary.model_provider,
         model_name=summary.model_name,
         collection_ids=summary.collection_ids,
+        pinned=summary.pinned,
         created_at=summary.created_at,
         updated_at=summary.updated_at,
+    )
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+def update_conversation(
+    conversation_id: str,
+    body: UpdateConversationRequest,
+    chat_service: ChatService = Depends(get_chat_service),
+) -> ConversationOut:
+    try:
+        record = chat_service.update_conversation(
+            conversation_id,
+            title=body.title,
+            pinned=body.pinned,
+            system_prompt=body.system_prompt,
+            model_provider=body.model_provider,
+            model_name=body.model_name,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    summary = chat_service._summary(record)
+    return ConversationOut(
+        id=summary.id,
+        title=summary.title,
+        model_provider=summary.model_provider,
+        model_name=summary.model_name,
+        collection_ids=summary.collection_ids,
+        pinned=summary.pinned,
+        created_at=summary.created_at,
+        updated_at=summary.updated_at,
+    )
+
+
+@router.post("/conversations/{conversation_id}/regenerate")
+async def regenerate_last_message(
+    conversation_id: str,
+    body: RegenerateRequest,
+    chat_service: ChatService = Depends(get_chat_service),
+) -> StreamingResponse:
+    user_text = chat_service.delete_last_assistant_message(conversation_id)
+    if user_text is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No assistant message to regenerate.",
+        )
+
+    async def event_stream():
+        try:
+            async for event in chat_service.stream_message(
+                conversation_id=conversation_id,
+                user_text=user_text,
+                temperature=body.temperature,
+                model_provider=body.model_provider,
+                model_name=body.model_name,
+                rerank=body.rerank,
+            ):
+                payload: dict = {"kind": event.kind}
+                if event.kind == "citations":
+                    payload["citations"] = [_citation_to_dict(c) for c in event.citations]
+                    if event.conversation_id:
+                        payload["conversation_id"] = event.conversation_id
+                elif event.kind == "graph":
+                    payload["graph_lines"] = event.graph_lines
+                elif event.kind == "delta":
+                    payload["delta"] = event.delta or ""
+                elif event.kind == "done":
+                    payload["finish_reason"] = event.finish_reason
+                    payload["conversation_id"] = event.conversation_id
+                    payload["message_id"] = event.message_id
+                elif event.kind == "error":
+                    payload["error"] = event.error
+                yield f"data: {json.dumps(payload)}\n\n"
+        except Exception as exc:  # pragma: no cover
+            yield f"data: {json.dumps({'kind': 'error', 'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -145,16 +248,22 @@ async def chat(
                 conversation_id=body.conversation_id,
                 user_text=body.message,
                 collection_ids=body.collection_ids,
+                document_ids=body.document_ids,
                 top_k=body.top_k,
                 vector_weight=body.vector_weight,
                 temperature=body.temperature,
                 model_provider=body.model_provider,
                 model_name=body.model_name,
                 system_prompt=body.system_prompt,
+                rerank=body.rerank,
             ):
                 payload: dict = {"kind": event.kind}
                 if event.kind == "citations":
                     payload["citations"] = [_citation_to_dict(c) for c in event.citations]
+                    if event.conversation_id:
+                        payload["conversation_id"] = event.conversation_id
+                elif event.kind == "graph":
+                    payload["graph_lines"] = event.graph_lines
                     if event.conversation_id:
                         payload["conversation_id"] = event.conversation_id
                 elif event.kind == "delta":

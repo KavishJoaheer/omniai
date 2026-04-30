@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from omniai.adapters.relational.sqlalchemy.models import (
     ApiKeyRecord,
     AuditEventRecord,
+    RevokedTokenRecord,
     TeamMembershipRecord,
     TeamRecord,
     TenantMembershipRecord,
@@ -22,7 +23,7 @@ from omniai.config.settings import Settings
 from omniai.domain.knowledge.models import utc_now
 from omniai.security.hashing import hash_api_key, hash_password, verify_password
 from omniai.security.permissions import Perm, assert_permission
-from omniai.security.tokens import create_session_token, verify_session_token
+from omniai.security.tokens import create_session_token, generate_jti, verify_session_token
 
 
 @dataclass(slots=True)
@@ -169,6 +170,16 @@ class AuthService:
 
     def authenticate_session_token(self, token: str) -> AuthenticatedPrincipal:
         payload = verify_session_token(token, self._settings.auth_secret)
+
+        # Check revocation blocklist before any DB user lookup
+        jti = payload.get("jti")
+        if jti:
+            revoked = self._session.scalar(
+                select(RevokedTokenRecord).where(RevokedTokenRecord.jti == jti)
+            )
+            if revoked is not None:
+                raise PermissionError("Session has been revoked.")
+
         user = self._session.scalar(select(UserRecord).where(UserRecord.id == payload["sub"]))
         if user is None or not bool(user.is_active):
             raise PermissionError("User account is not available.")
@@ -225,9 +236,96 @@ class AuthService:
                 "tenant_id": principal.tenant_id,
                 "role": principal.role,
                 "exp": expires_at,
+                "jti": generate_jti(),   # unique ID enables explicit revocation
             },
             self._settings.auth_secret,
         )
+
+    def logout(self, token: str) -> None:
+        """Revoke a session token immediately.
+
+        The token is added to the ``revoked_tokens`` blocklist so that
+        subsequent requests presenting the same token are rejected even though
+        the signature is still technically valid.  Expired tokens are silently
+        accepted so that logging out an already-expired session never fails.
+        """
+        try:
+            payload = verify_session_token(token, self._settings.auth_secret)
+        except ValueError:
+            return  # expired / malformed — nothing to revoke
+
+        jti = payload.get("jti")
+        if not jti:
+            return  # legacy token without jti — can't revoke by ID
+
+        existing = self._session.scalar(
+            select(RevokedTokenRecord).where(RevokedTokenRecord.jti == jti)
+        )
+        if existing is not None:
+            return  # already revoked
+
+        from datetime import datetime, timezone as _tz
+        self._session.add(
+            RevokedTokenRecord(
+                jti=jti,
+                user_id=payload["sub"],
+                expires_at=datetime.fromtimestamp(payload["exp"], tz=_tz.utc),
+            )
+        )
+        self._session.commit()
+
+    def request_password_reset(self, email: str) -> str | None:
+        """Generate a one-time reset token for the user.
+
+        Returns the raw token string (to be delivered via email/console).
+        Returns ``None`` silently if the email is not found — never reveal
+        whether an address exists.
+        """
+        user = self._session.scalar(
+            select(UserRecord).where(UserRecord.email == self._normalize_email(email))
+        )
+        if user is None or not bool(user.is_active):
+            return None
+
+        raw_token = secrets.token_urlsafe(32)
+        from omniai.security.hashing import hash_password as _hash  # reuse SHA-256 pipeline
+        user.reset_token_hash = _hash(raw_token)          # store hash, never plaintext
+        from datetime import datetime, timedelta, timezone as _tz
+        user.reset_token_expires_at = datetime.now(_tz.utc) + timedelta(hours=1)
+        self._session.commit()
+        return raw_token
+
+    def reset_password(self, token: str, new_password: str) -> None:
+        """Consume a reset token and update the user's password."""
+        from datetime import datetime, timezone as _tz
+        from omniai.security.hashing import hash_password as _hash, verify_password as _verify
+
+        if len(new_password) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+
+        now = datetime.now(_tz.utc)
+        # We must find the user by hashing candidate tokens — not feasible at scale,
+        # so we iterate candidates (reset tokens are short-lived and rare).
+        # Scalable alternative: store a lookup-safe prefix + hash.
+        users = list(self._session.scalars(
+            select(UserRecord).where(
+                UserRecord.reset_token_hash.is_not(None),
+                UserRecord.reset_token_expires_at > now,
+            )
+        ))
+        matched: UserRecord | None = None
+        for user in users:
+            if _verify(token, user.reset_token_hash or ""):
+                matched = user
+                break
+
+        if matched is None:
+            raise ValueError("Reset token is invalid or has expired.")
+
+        matched.password_hash = _hash(new_password)
+        matched.reset_token_hash = None
+        matched.reset_token_expires_at = None
+        self._session.commit()
 
     def list_api_keys(self, principal: AuthenticatedPrincipal) -> list[dict]:
         statement = select(ApiKeyRecord).where(ApiKeyRecord.tenant_id == principal.tenant_id)

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: omniai
+description: Omni-AI — local-first retrieval-augmented generation platform.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - rag
+  - llm
+  - knowledge-base
+  - semantic-search
+home: https://github.com/KavishJoaheer/omniai
+maintainers:
+  - name: Omni-AI Team
+sources:
+  - https://github.com/KavishJoaheer/omniai

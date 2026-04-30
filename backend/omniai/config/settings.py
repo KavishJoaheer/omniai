@@ -29,6 +29,24 @@ class Settings(BaseSettings):
 
     search_kind: str = Field(default="opensearch", alias="SEARCH_KIND")
     search_url: str | None = Field(default=None, alias="SEARCH_URL")
+    search_snapshot_path: str | None = Field(default=None, alias="SEARCH_SNAPSHOT_PATH")
+
+    reranker_kind: str = Field(default="paired", alias="RERANKER_KIND")
+    reranker_model: str = Field(default="BAAI/bge-reranker-base", alias="RERANKER_MODEL")
+
+    ocr_kind: str = Field(default="none", alias="OCR_KIND")
+    ocr_min_chars_per_page: int = Field(default=50, alias="OCR_MIN_CHARS_PER_PAGE")
+    ocr_image_dpi: int = Field(default=200, alias="OCR_IMAGE_DPI")
+    ollama_vision_model: str = Field(default="llava", alias="OLLAMA_VISION_MODEL")
+
+    sandbox_kind: str = Field(default="none", alias="SANDBOX_KIND")
+    sandbox_default_timeout_seconds: float = Field(default=30.0, alias="SANDBOX_DEFAULT_TIMEOUT_SECONDS")
+
+    retrieval_cache_ttl_seconds: int = Field(default=0, alias="RETRIEVAL_CACHE_TTL_SECONDS")
+
+    rate_limit_per_minute: int = Field(default=120, alias="RATE_LIMIT_PER_MINUTE")
+    tenant_max_documents: int = Field(default=10000, alias="TENANT_MAX_DOCUMENTS")
+    tenant_max_storage_bytes: int = Field(default=50 * 1024 * 1024 * 1024, alias="TENANT_MAX_STORAGE_BYTES")
 
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
 

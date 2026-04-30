@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -12,8 +13,11 @@ from omniai.config.settings import Settings
 from omniai.domain.knowledge.models import Chunk
 from omniai.plugins.chunk_templates import ChunkTemplateRegistry
 from omniai.plugins.embedding_providers import build_embedding_provider
+from omniai.plugins.parsers.pdf import PAGE_MARKER_RE
 from omniai.ports.object_store import ObjectStorePort
+from omniai.ports.queue import JobQueuePort
 from omniai.ports.search_engine import IndexableChunk, SearchEnginePort
+from omniai.workers.graph_extraction import GRAPH_JOB_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,7 @@ async def index_document(
     object_store: ObjectStorePort,
     search_engine: SearchEnginePort,
     chunk_templates: ChunkTemplateRegistry,
+    queue: JobQueuePort | None = None,
     tenant_id: str,
     document_id: str,
 ) -> None:
@@ -90,7 +95,11 @@ async def index_document(
         # For small-to-big templates, wire up parent_chunk_id on child chunks.
         _link_parent_chunks(session, all_chunks)
 
-        # Reload chunks so parent_chunk_id values are fresh from the DB
+        # Tag each chunk with the page number derived from [OMNI_PAGE_N] markers
+        # left by the PDF parser, then strip the markers from the chunk text.
+        _tag_chunk_pages(session, all_chunks)
+
+        # Reload chunks so parent_chunk_id + metadata + cleaned text are fresh
         all_chunks = store.list_chunks(document_id=document_id)
 
         # Only embed + index chunks that are marked indexable (children, or all for flat templates)
@@ -162,6 +171,11 @@ async def index_document(
             page_count=document.page_count,
             parser_name=document.parser_name,
         )
+        if queue is not None:
+            await queue.enqueue(
+                job_name=GRAPH_JOB_NAME,
+                payload={"tenant_id": tenant_id, "document_id": document_id},
+            )
         logger.info(
             "index_document: %s ready (%d chunks, %d indexed, model=%s)",
             document_id,
@@ -205,4 +219,51 @@ def _link_parent_chunks(session, all_chunks: list[Chunk]) -> None:
                     .where(ChunkRecord.id == chunk.id)
                     .values(parent_chunk_id=parent_id)
                 )
+    session.commit()
+
+
+def _tag_chunk_pages(session, all_chunks: list[Chunk]) -> None:
+    """Scan each chunk's text for [OMNI_PAGE_N] markers, write page_number into
+    chunk.metadata.page_number (and start_page/end_page when a chunk crosses a
+    boundary), and strip the markers out of the stored text and char/token counts.
+
+    Chunks with no marker inherit the previous chunk's page_number (typical for
+    chunks that span past a marker into mid-content).
+    """
+    if not any(PAGE_MARKER_RE.search(c.text) for c in all_chunks):
+        # No PDF markers in any chunk → likely a non-PDF document, skip.
+        return
+
+    last_page: int | None = None
+    for chunk in all_chunks:
+        matches = list(PAGE_MARKER_RE.finditer(chunk.text))
+        if matches:
+            start_page = int(matches[0].group(1))
+            end_page = int(matches[-1].group(1))
+            page_number = start_page
+            last_page = end_page
+        else:
+            page_number = last_page  # may be None for chunks before the first marker
+
+        cleaned_text = PAGE_MARKER_RE.sub("", chunk.text).strip()
+        # Re-tighten paragraph breaks the marker created
+        cleaned_text = "\n\n".join(p for p in cleaned_text.split("\n\n") if p.strip())
+
+        new_metadata = {**chunk.metadata}
+        if page_number is not None:
+            new_metadata["page_number"] = page_number
+            if matches and start_page != end_page:
+                new_metadata["start_page"] = start_page
+                new_metadata["end_page"] = end_page
+
+        session.execute(
+            update(ChunkRecord)
+            .where(ChunkRecord.id == chunk.id)
+            .values(
+                text=cleaned_text,
+                char_count=len(cleaned_text),
+                token_count=max(1, len(cleaned_text.split())),
+                metadata_json=json.dumps(new_metadata, separators=(",", ":"), sort_keys=True),
+            )
+        )
     session.commit()

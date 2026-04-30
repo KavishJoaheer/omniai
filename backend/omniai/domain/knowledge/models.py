@@ -19,6 +19,9 @@ class Collection(BaseModel):
     description: str | None = None
     embedding_model: str = "text-embedding-default"
     chunk_template: str = "general"
+    system_prompt: str | None = None
+    top_k: int = 8
+    vector_weight: float = 0.6
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     document_count: int = 0
@@ -57,5 +60,31 @@ class Document(BaseModel):
     parser_name: str | None = None
     error_message: str | None = None
     parsed_at: datetime | None = None
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+CollectionRole = Literal["OWNER", "EDITOR", "VIEWER"]
+
+
+class CollectionMembership(BaseModel):
+    id: str = Field(default_factory=lambda: f"cmem_{uuid4().hex[:12]}")
+    tenant_id: str = ""
+    collection_id: str
+    user_id: str
+    role: CollectionRole = "VIEWER"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class GraphTriple(BaseModel):
+    id: str = Field(default_factory=lambda: f"gtr_{uuid4().hex[:12]}")
+    tenant_id: str = ""
+    collection_id: str
+    document_id: str
+    subject: str
+    predicate: str
+    object: str
+    confidence: float = 1.0
+    created_at: datetime = Field(default_factory=utc_now)

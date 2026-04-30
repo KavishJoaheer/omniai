@@ -1,9 +1,6 @@
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Request
 
-from omniai.interfaces.http.deps import get_metrics
 from omniai.interfaces.http.envelope import ok
-from omniai.observability.metrics import MetricsRegistry
 
 router = APIRouter(prefix="/v1", tags=["system"])
 
@@ -20,6 +17,4 @@ def health(request: Request) -> dict:
     )
 
 
-@router.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
-def metrics(metrics_registry: MetricsRegistry = Depends(get_metrics)) -> str:
-    return metrics_registry.render_prometheus()
+# /v1/metrics is registered directly in app.py to return real Prometheus output

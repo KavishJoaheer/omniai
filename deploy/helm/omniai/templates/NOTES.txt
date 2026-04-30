@@ -1,0 +1,36 @@
+Omni-AI {{ .Chart.AppVersion }} is installing.
+
+Once pods are Ready (`kubectl get pods -n {{ .Release.Namespace }}`), the
+admin user will be available at:
+
+    email:    {{ .Values.config.bootstrapAdminEmail }}
+    password: <set in Values.config.bootstrapAdminPassword>
+
+{{- if .Values.ingress.enabled }}
+
+Public URL:
+    https://{{ .Values.global.domain }}
+
+If TLS is via cert-manager, watch the certificate provisioning with:
+    kubectl describe certificate -n {{ .Release.Namespace }} {{ .Values.ingress.tls.secretName }}
+{{- else }}
+
+Ingress is disabled. Port-forward the frontend Service:
+    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "omniai.fullname" . }}-frontend 8080:8080
+{{- end }}
+
+Verify:
+    kubectl exec -it deploy/{{ include "omniai.fullname" . }}-api -- curl -s localhost:9380/v1/health
+
+Scale workers:
+    kubectl scale -n {{ .Release.Namespace }} deploy/{{ include "omniai.fullname" . }}-worker --replicas=N
+
+Migrations run automatically on api pod startup. If you need to run them
+ad-hoc (e.g. before deploying a new image):
+    kubectl run -n {{ .Release.Namespace }} omniai-migrate --rm -i --tty \
+        --image={{ .Values.api.image.repository }}:{{ .Values.api.image.tag }} \
+        --env="OMNIAI_ROLE=migrate" \
+        --restart=Never \
+        --command -- /usr/local/bin/entrypoint.sh
+
+See deploy/DEPLOY.md for backup, restore, and key-rotation runbooks.

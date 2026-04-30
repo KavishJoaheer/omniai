@@ -3,7 +3,8 @@ from collections.abc import Generator
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
+from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyAgentStore, SqlAlchemyKnowledgeStore
+from omniai.application.agent_service import AgentService
 from omniai.application.auth_service import AuthService, AuthenticatedPrincipal
 from omniai.application.chat_service import ChatService
 from omniai.application.ingestion_service import IngestionService
@@ -76,7 +77,7 @@ def get_knowledge_service(
     principal: AuthenticatedPrincipal = Depends(get_current_principal),
 ) -> KnowledgeService:
     store = SqlAlchemyKnowledgeStore(session, principal.tenant_id)
-    return KnowledgeService(store)
+    return KnowledgeService(store, tenant_role=principal.role, user_id=principal.user_id)
 
 
 def get_object_store(request: Request) -> ObjectStorePort:
@@ -100,13 +101,16 @@ def get_ingestion_service(
     parsers: ParserRegistry = Depends(get_parser_registry),
 ) -> IngestionService:
     store = SqlAlchemyKnowledgeStore(session, principal.tenant_id)
+    settings = request.app.state.container.settings
     return IngestionService(
         store=store,
         object_store=object_store,
         queue=queue,
         parsers=parsers,
         tenant_id=principal.tenant_id,
-        max_bytes=request.app.state.container.settings.upload_max_bytes,
+        max_bytes=settings.upload_max_bytes,
+        tenant_max_documents=settings.tenant_max_documents,
+        tenant_max_storage_bytes=settings.tenant_max_storage_bytes,
     )
 
 
@@ -147,10 +151,16 @@ def get_retrieval_service(
         tenant_id=principal.tenant_id,
         requested_model="nomic-embed-text",
     )
+    store = SqlAlchemyKnowledgeStore(session, principal.tenant_id)
+    container = request.app.state.container
     return RetrievalService(
         search_engine=search_engine,
         embedding_provider=provider,
         tenant_id=principal.tenant_id,
+        store=store,
+        reranker=container.reranker,
+        cache=container.retrieval_cache,
+        cache_ttl=container.settings.retrieval_cache_ttl_seconds,
     )
 
 
@@ -168,4 +178,17 @@ def get_chat_service(
         retrieval_service=retrieval_service,
         tenant_id=principal.tenant_id,
         user_id=principal.user_id,
+    )
+
+
+def get_agent_service(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> AgentService:
+    return AgentService(
+        store=SqlAlchemyAgentStore(session, principal.tenant_id),
+        retrieval_service=retrieval_service,
+        sandbox=request.app.state.container.sandbox,
     )

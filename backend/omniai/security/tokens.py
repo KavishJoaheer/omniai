@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from typing import Any
 
@@ -17,7 +18,18 @@ def _b64decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + padding)
 
 
+def generate_jti() -> str:
+    """Return a cryptographically-random 32-byte token identifier (URL-safe base64)."""
+    return secrets.token_urlsafe(32)
+
+
 def create_session_token(payload: dict[str, Any], secret: str) -> str:
+    """Create a signed session token.
+
+    The payload *must* include a ``jti`` field (token ID) so the token can be
+    revoked individually via the blocklist.  ``issue_session_token`` in
+    ``AuthService`` is responsible for injecting it.
+    """
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     encoded_payload = _b64encode(payload_bytes)
     signature = hmac.new(secret.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).digest()
@@ -25,6 +37,11 @@ def create_session_token(payload: dict[str, Any], secret: str) -> str:
 
 
 def verify_session_token(token: str, secret: str) -> dict[str, Any]:
+    """Verify signature and expiry.  Returns the decoded payload dict.
+
+    Does NOT check the revocation blocklist — that requires a DB lookup and is
+    done in ``AuthService.authenticate_session_token``.
+    """
     parts = token.split(".")
     if len(parts) != 3 or parts[0] != "sess":
         raise ValueError("Invalid session token format.")

@@ -1,0 +1,33 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "omniai.fullname" . }}
+  labels: {{- include "omniai.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.global.domain | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.global.domain | quote }}
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "omniai.fullname" . }}-api
+                port: { number: {{ .Values.api.service.port }} }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "omniai.fullname" . }}-frontend
+                port: { number: {{ .Values.frontend.service.port }} }
+{{- end }}

@@ -12,3 +12,21 @@ coverage/
 *.db
 *.sqlite
 *.egg-info/
+
+# Local object-store data (development only)
+.omniai-storage/
+backend/.omniai-storage/
+
+# Search engine snapshot files (local persistence; regenerated on boot)
+*.snapshot.pkl
+
+# Generated reports
+omniai_industry_grade_report.pdf
+
+# IDE / editor state
+.idea/
+.vscode/
+
+# Coverage outputs
+backend/coverage.xml
+htmlcov/

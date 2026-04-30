@@ -84,6 +84,7 @@ class OpenSearchEngine:
         top_k: int,
         vector_weight: float,
         collection_ids: list[str] | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[SearchHit]:
         index = _index_name(tenant_id)
         if not self._client.indices.exists(index=index):
@@ -93,6 +94,8 @@ class OpenSearchEngine:
         filter_clauses: list[dict] = []
         if collection_ids:
             filter_clauses.append({"terms": {"collection_id": collection_ids}})
+        if document_ids:
+            filter_clauses.append({"terms": {"document_id": document_ids}})
 
         should: list[dict] = []
         if query_vector:

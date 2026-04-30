@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+  pull_request:
+    branches: ["main", "master", "develop"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Backend ───────────────────────────────────────────────────────────────
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: python -m ruff check omniai/ tests/
+
+      - name: Type-check (pyright, best-effort)
+        continue-on-error: true
+        run: |
+          pip install pyright --quiet
+          python -m pyright omniai/ --pythonversion ${{ matrix.python-version }} || true
+
+      - name: Run tests with coverage
+        env:
+          DB_URL: "sqlite:///:memory:"
+          AUTO_CREATE_SCHEMA: "true"
+          OBJECT_STORE_KIND: "local"
+          OBJECT_STORE_LOCAL_DIR: "/tmp/omniai-test-storage"
+          SEARCH_KIND: "memory"
+          WORKER_INLINE: "true"
+          ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          AUTH_SECRET: "ci-test-auth-secret"
+          BOOTSTRAP_ADMIN_EMAIL: "ci@omniai.local"
+          BOOTSTRAP_ADMIN_PASSWORD: "CiPassword123!"
+          RERANKER_KIND: "paired"
+          SANDBOX_KIND: "subprocess"
+          RATE_LIMIT_PER_MINUTE: "10000"
+          LOG_FORMAT: "text"
+        run: |
+          pip install pytest-cov --quiet
+          python -m pytest --tb=short -q \
+            --cov=omniai \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          fail_ci_if_error: false
+
+  # ── Frontend ──────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend type-check & lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Lint (eslint, if configured)
+        continue-on-error: true
+        run: npx eslint src/ --ext .ts,.tsx || true
+
+      - name: Run unit tests (vitest)
+        run: npx vitest run --reporter=default
+
+  # ── Integration smoke test ────────────────────────────────────────────────
+  integration:
+    name: Integration smoke test
+    runs-on: ubuntu-latest
+    needs: backend
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" httpx
+
+      - name: Run integration tests
+        env:
+          DB_URL: "sqlite:///./ci-integration.db"
+          AUTO_CREATE_SCHEMA: "true"
+          OBJECT_STORE_KIND: "local"
+          OBJECT_STORE_LOCAL_DIR: "/tmp/omniai-integration-storage"
+          SEARCH_KIND: "memory"
+          WORKER_INLINE: "false"
+          ENCRYPTION_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          AUTH_SECRET: "ci-integration-auth-secret"
+          BOOTSTRAP_ADMIN_EMAIL: "integration@omniai.local"
+          BOOTSTRAP_ADMIN_PASSWORD: "Integration123!"
+          RERANKER_KIND: "paired"
+          SANDBOX_KIND: "subprocess"
+          RATE_LIMIT_PER_MINUTE: "10000"
+          LOG_FORMAT: "text"
+        run: |
+          python -m pytest tests/test_http_integration.py -v --tb=short

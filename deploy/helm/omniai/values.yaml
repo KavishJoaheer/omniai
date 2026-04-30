@@ -1,0 +1,145 @@
+# Default values for the omniai Helm chart.
+# Override with: helm upgrade --install omniai ./deploy/helm/omniai -f my-values.yaml
+
+global:
+  # Domain at which the frontend + API will be served.
+  domain: omniai.example.com
+  # Pull policy applied to all images unless overridden.
+  imagePullPolicy: IfNotPresent
+
+# ---- Backend (FastAPI) ----------------------------------------------------
+
+api:
+  image:
+    repository: omniai-backend
+    tag: latest
+  replicas: 2
+  resources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "1",     memory: "1500Mi" }
+  service:
+    type: ClusterIP
+    port: 9380
+  # Liveness uses /v1/health, readiness same. Startup probe lets migrations finish.
+  probes:
+    startup:    { failureThreshold: 30, periodSeconds: 5 }
+    liveness:   { initialDelaySeconds: 10, periodSeconds: 15 }
+    readiness:  { initialDelaySeconds: 5,  periodSeconds: 10 }
+  # HPA scales on CPU. Tune to your traffic.
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+# ---- Worker (arq) ---------------------------------------------------------
+
+worker:
+  image:
+    repository: omniai-backend
+    tag: latest
+  replicas: 2
+  resources:
+    requests: { cpu: "300m", memory: "1Gi" }
+    limits:   { cpu: "2",     memory: "3Gi" }
+
+# ---- Frontend (nginx + SPA) -----------------------------------------------
+
+frontend:
+  image:
+    repository: omniai-frontend
+    tag: latest
+  replicas: 2
+  resources:
+    requests: { cpu: "50m",  memory: "64Mi"  }
+    limits:   { cpu: "200m", memory: "256Mi" }
+  service:
+    type: ClusterIP
+    port: 8080
+
+# ---- Ingress --------------------------------------------------------------
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "110m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  tls:
+    enabled: true
+    secretName: omniai-tls
+
+# ---- Secrets --------------------------------------------------------------
+# In real deployments, prefer external-secrets / SealedSecrets / HashiCorp
+# Vault. The chart will create a Secret only if `secret.create: true`.
+
+secret:
+  create: true
+  encryptionKey: "REPLACE-IN-PROD-min-40-chars-please-please-please"
+  authSecret: "REPLACE-IN-PROD-32-bytes-min"
+
+# ---- Bundled subcharts (set enabled=false to use external services) -------
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  user: omniai
+  password: "REPLACE-IN-PROD"
+  database: omniai
+  storage:
+    size: 20Gi
+    storageClassName: ""
+  resources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "2",     memory: "2Gi" }
+
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+  storage:
+    size: 5Gi
+    storageClassName: ""
+
+minio:
+  enabled: true
+  image:
+    repository: minio/minio
+    tag: latest
+  rootUser: omniai
+  rootPassword: "REPLACE-IN-PROD-at-least-16-chars"
+  storage:
+    size: 100Gi
+    storageClassName: ""
+  bucket: omniai
+
+opensearch:
+  enabled: true
+  image:
+    repository: opensearchproject/opensearch
+    tag: "2.15.0"
+  heap: "1g"
+  storage:
+    size: 30Gi
+    storageClassName: ""
+
+# ---- App configuration (passed to API + worker) ---------------------------
+
+config:
+  appEnv: production
+  rateLimitPerMinute: 300
+  tenantMaxDocuments: 10000
+  tenantMaxStorageBytes: 53687091200
+  rerankerKind: paired
+  rerankerModel: "BAAI/bge-reranker-base"
+  ocrKind: none
+  # Set this to your in-cluster Ollama service URL, or an external endpoint.
+  ollamaBaseUrl: "http://ollama.ollama.svc.cluster.local:11434"
+  ollamaVisionModel: llava
+  bootstrapAdminEmail: admin@example.com
+  bootstrapAdminPassword: "REPLACE-IN-PROD"

@@ -9,7 +9,9 @@ from omniai.ports.search_engine import SearchEnginePort
 def build_search_engine(settings: Settings) -> SearchEnginePort:
     kind = settings.search_kind.lower()
     if kind in {"memory", "in_memory", "none", ""}:
-        return InMemorySearchEngine()
+        engine = InMemorySearchEngine(snapshot_path=settings.search_snapshot_path)
+        engine.load_snapshot()
+        return engine
     if kind == "opensearch":
         url = settings.search_url or "http://localhost:9200"
         return OpenSearchEngine(url=url)

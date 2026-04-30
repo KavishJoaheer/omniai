@@ -21,7 +21,9 @@ class RetrieveRequest(BaseModel):
     top_k: int = Field(default=8, ge=1, le=50)
     vector_weight: float = Field(default=0.6, ge=0.0, le=1.0)
     collection_ids: list[str] | None = None
+    document_ids: list[str] | None = None
     embedding_model: str = "nomic-embed-text"
+    rerank: bool = True
 
 
 class HitOut(BaseModel):
@@ -51,7 +53,9 @@ async def retrieve(
             top_k=body.top_k,
             vector_weight=body.vector_weight,
             collection_ids=body.collection_ids,
+            document_ids=body.document_ids,
             embedding_model=body.embedding_model,
+            rerank=body.rerank,
         )
     )
     hits = [
@@ -81,6 +85,8 @@ class ChunkOut(BaseModel):
     token_count: int
     template_name: str
     metadata: dict
+    parent_chunk_id: str | None
+    is_indexable: bool
     indexed_at: str | None
 
 
@@ -105,6 +111,8 @@ def list_chunks(
             token_count=c.token_count,
             template_name=c.template_name,
             metadata=c.metadata,
+            parent_chunk_id=c.parent_chunk_id,
+            is_indexable=c.is_indexable,
             indexed_at=c.indexed_at.isoformat() if c.indexed_at else None,
         )
         for c in chunks
