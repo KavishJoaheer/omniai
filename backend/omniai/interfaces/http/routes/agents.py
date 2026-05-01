@@ -5,7 +5,14 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response as HttpResponse
 
-from omniai.application.agent_service import AgentService, CreateAgentInput, StartAgentRunInput, UpdateAgentInput
+from omniai.application.agent_service import (
+    AgentService,
+    CreateAgentInput,
+    ReplayAgentRunInput,
+    ResumeAgentRunInput,
+    StartAgentRunInput,
+    UpdateAgentInput,
+)
 from omniai.interfaces.http.deps import get_agent_service, get_current_principal
 from omniai.interfaces.http.envelope import ok
 
@@ -124,6 +131,54 @@ def get_agent_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+# ── M20: Human-in-the-loop resume ────────────────────────────────────────────
+
+@router.post("/{agent_id}/runs/{run_id}/resume")
+async def resume_agent_run(
+    agent_id: str,
+    run_id: str,
+    payload: ResumeAgentRunInput,
+    _: object = Depends(get_current_principal),
+    service: AgentService = Depends(get_agent_service),
+) -> dict:
+    """Resume a PAUSED run by supplying the human's response.
+
+    The human can approve the current context (``approved=true``) or provide
+    corrected text (``human_input``).  The run continues from the node after
+    the ``human_input`` node.
+    """
+    try:
+        return ok(await service.resume_run(agent_id, run_id, payload))
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+# ── M20: Time-travel replay ───────────────────────────────────────────────────
+
+@router.post("/{agent_id}/runs/{run_id}/replay", status_code=status.HTTP_201_CREATED)
+async def replay_agent_run(
+    agent_id: str,
+    run_id: str,
+    payload: ReplayAgentRunInput,
+    _: object = Depends(get_current_principal),
+    service: AgentService = Depends(get_agent_service),
+) -> dict:
+    """Create a new run that replays an existing one from a specific event offset.
+
+    Useful for debugging — events 0..N are replayed from the stored log,
+    then execution continues live from that point.  The returned run has
+    ``replay_of_run_id`` set to the original run's ID.
+    """
+    try:
+        return ok(await service.replay_run(agent_id, run_id, payload), message="created")
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 # ── M18: Agent run export ────────────────────────────────────────────────────
 
 @router.get("/{agent_id}/runs/{run_id}/export")
@@ -170,8 +225,13 @@ def export_agent_run(
             f"**Agent:** {agent_dict.get('name', agent_id)}",
             f"**Run ID:** {run_id}",
             f"**Status:** {run_dict.get('status', 'unknown')}",
-            "",
         ]
+        if run_dict.get("cost_usd"):
+            lines.append(f"**Cost:** ${run_dict['cost_usd']:.4f}")
+        if run_dict.get("replay_of_run_id"):
+            lines.append(f"**Replayed from:** {run_dict['replay_of_run_id']}")
+        lines.append("")
+
         inp = run_dict.get("input") or ""
         if inp:
             lines += ["## Input", "", str(inp), ""]

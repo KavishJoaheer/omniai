@@ -731,7 +731,14 @@ class SqlAlchemyAgentStore(AgentStorePort):
         )
         return [self._to_agent(record) for record in self._session.scalars(statement)]
 
-    def create_agent(self, *, name: str, description: str | None, definition: dict) -> Agent:
+    def create_agent(
+        self,
+        *,
+        name: str,
+        description: str | None,
+        definition: dict,
+        template_id: str | None = None,
+    ) -> Agent:
         duplicate = self._session.scalar(
             select(AgentRecord).where(
                 AgentRecord.tenant_id == self._tenant_id,
@@ -746,6 +753,7 @@ class SqlAlchemyAgentStore(AgentStorePort):
             description=description,
             definition_json=json.dumps(definition),
             published=0,
+            template_id=template_id,
         )
         self._session.add(record)
         self._session.commit()
@@ -813,7 +821,14 @@ class SqlAlchemyAgentStore(AgentStorePort):
     def get_run(self, agent_id: str, run_id: str) -> AgentRun:
         return self._to_run(self._get_run_record(agent_id, run_id))
 
-    def create_run(self, *, agent_id: str, input_payload: dict) -> AgentRun:
+    def create_run(
+        self,
+        *,
+        agent_id: str,
+        input_payload: dict,
+        replay_of_run_id: str | None = None,
+        replay_from_event: int | None = None,
+    ) -> AgentRun:
         self._get_agent_record(agent_id)
         record = AgentRunRecord(
             tenant_id=self._tenant_id,
@@ -822,6 +837,8 @@ class SqlAlchemyAgentStore(AgentStorePort):
             input_json=json.dumps(input_payload),
             output_json="{}",
             events_json="[]",
+            replay_of_run_id=replay_of_run_id,
+            replay_from_event=replay_from_event,
         )
         self._session.add(record)
         self._session.commit()
@@ -836,6 +853,8 @@ class SqlAlchemyAgentStore(AgentStorePort):
         output: dict,
         events: list[dict],
         error_message: str | None = None,
+        paused_at_node: str | None = None,
+        cost_usd: float = 0.0,
         started: bool = False,
         completed: bool = False,
     ) -> AgentRun:
@@ -851,6 +870,9 @@ class SqlAlchemyAgentStore(AgentStorePort):
         record.output_json = json.dumps(output)
         record.events_json = json.dumps(events)
         record.error_message = error_message
+        if paused_at_node is not None:
+            record.paused_at_node = paused_at_node
+        record.cost_usd = cost_usd
         if started and record.started_at is None:
             record.started_at = utc_now()
         if completed:
@@ -892,6 +914,7 @@ class SqlAlchemyAgentStore(AgentStorePort):
             description=record.description,
             definition=json.loads(record.definition_json or "{}"),
             published=bool(record.published),
+            template_id=getattr(record, "template_id", None),
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
@@ -907,6 +930,11 @@ class SqlAlchemyAgentStore(AgentStorePort):
             output=json.loads(record.output_json or "{}"),
             events=json.loads(record.events_json or "[]"),
             error_message=record.error_message,
+            paused_at_node=getattr(record, "paused_at_node", None),
+            resumed_with=json.loads(getattr(record, "resumed_with_json", None) or "{}"),
+            replay_of_run_id=getattr(record, "replay_of_run_id", None),
+            replay_from_event=getattr(record, "replay_from_event", None),
+            cost_usd=float(getattr(record, "cost_usd", 0.0) or 0.0),
             started_at=record.started_at,
             completed_at=record.completed_at,
             created_at=record.created_at,

@@ -97,8 +97,9 @@ def test_subprocess_sandbox_seeded_files_not_in_artifacts():
 # ---- unsupported language ---------------------------------------------------
 
 
-def test_subprocess_sandbox_rejects_non_python():
-    result = run(SandboxRequest(code="console.log('hi')", language="javascript"))
+def test_subprocess_sandbox_rejects_unsupported_language():
+    # "ruby" is not in the supported set (python, javascript, bash)
+    result = run(SandboxRequest(code="puts 'hi'", language="ruby"))
     assert result.exit_code == 1
     assert "unsupported language" in result.stderr
 

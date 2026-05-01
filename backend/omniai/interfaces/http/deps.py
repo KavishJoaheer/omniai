@@ -187,8 +187,10 @@ def get_agent_service(
     principal: AuthenticatedPrincipal = Depends(get_current_principal),
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ) -> AgentService:
+    settings = request.app.state.container.settings
     return AgentService(
         store=SqlAlchemyAgentStore(session, principal.tenant_id),
         retrieval_service=retrieval_service,
         sandbox=request.app.state.container.sandbox,
+        cost_alert_usd=float(getattr(settings, "agent_run_cost_alert_usd", 0.0) or 0.0),
     )

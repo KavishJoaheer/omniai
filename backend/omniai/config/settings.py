@@ -118,6 +118,18 @@ class Settings(BaseSettings):
     weaviate_api_key: str | None = Field(default=None, alias="WEAVIATE_API_KEY")
     weaviate_class_name: str = Field(default="OmniAIChunk", alias="WEAVIATE_CLASS_NAME")
 
+    # ── M20: Agent Platform ───────────────────────────────────────────────────
+    # Cost alerting: warn + emit event when a run exceeds this threshold (USD).
+    # Set to 0 to disable.
+    agent_run_cost_alert_usd: float = Field(default=0.0, alias="AGENT_RUN_COST_ALERT_USD")
+    # Marketplace: base URL for template registry (can be an internal endpoint)
+    agent_marketplace_url: str = Field(
+        default="https://marketplace.omniai.dev/templates",
+        alias="AGENT_MARKETPLACE_URL",
+    )
+    # gVisor: path to the runsc binary
+    gvisor_runsc_bin: str = Field(default="runsc", alias="GVISOR_RUNSC_BIN")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

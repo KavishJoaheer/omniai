@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from omniai.domain.knowledge.models import utc_now
 
 
-AgentRunStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
+# M20: added PAUSED for human-in-the-loop
+AgentRunStatus = Literal["QUEUED", "RUNNING", "PAUSED", "COMPLETED", "FAILED", "CANCELLED"]
 
 
 class Agent(BaseModel):
@@ -19,6 +20,8 @@ class Agent(BaseModel):
     description: str | None = None
     definition: dict = Field(default_factory=dict)
     published: bool = False
+    # M20: marketplace / import tracking
+    template_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -32,6 +35,15 @@ class AgentRun(BaseModel):
     output: dict = Field(default_factory=dict)
     events: list[dict] = Field(default_factory=list)
     error_message: str | None = None
+    # M20: human-in-the-loop — node that paused the run
+    paused_at_node: str | None = None
+    # M20: resume payload injected by the human
+    resumed_with: dict = Field(default_factory=dict)
+    # M20: time-travel — which run + event offset this was forked from
+    replay_of_run_id: str | None = None
+    replay_from_event: int | None = None
+    # M20: cost tracking
+    cost_usd: float = 0.0
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)

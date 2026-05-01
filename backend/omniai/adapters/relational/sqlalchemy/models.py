@@ -326,6 +326,8 @@ class AgentRecord(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text(), nullable=True)
     definition_json: Mapped[str] = mapped_column(Text(), default="{}")
     published: Mapped[int] = mapped_column(Integer, default=0)
+    # M20: marketplace / template import tracking
+    template_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     tenant: Mapped[TenantRecord] = relationship(back_populates="agents")
     runs: Mapped[list["AgentRunRecord"]] = relationship(back_populates="agent")
@@ -342,6 +344,14 @@ class AgentRunRecord(TimestampMixin, Base):
     output_json: Mapped[str] = mapped_column(Text(), default="{}")
     events_json: Mapped[str] = mapped_column(Text(), default="[]")
     error_message: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    # M20: human-in-the-loop
+    paused_at_node: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    resumed_with_json: Mapped[str] = mapped_column(Text(), default="{}")
+    # M20: time-travel replay
+    replay_of_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    replay_from_event: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # M20: cost tracking
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

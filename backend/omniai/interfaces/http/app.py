@@ -29,6 +29,10 @@ from omniai.interfaces.http.routes.identity import (
     mfa_router,
     oidc_router,
 )
+from omniai.interfaces.http.routes.marketplace import (
+    agents_import_router as marketplace_agents_import_router,
+    marketplace_router,
+)
 from omniai.interfaces.http.routes.observability import router as observability_router
 from omniai.interfaces.http.routes.system import router as system_router
 from omniai.interfaces.http.routes.teams import router as teams_router
@@ -159,6 +163,8 @@ def create_app() -> FastAPI:
     app.include_router(retrieval_router)
     app.include_router(chat_router)
     app.include_router(agents_router)
+    app.include_router(marketplace_router)
+    app.include_router(marketplace_agents_import_router)
     app.include_router(connectors_router)
     app.include_router(deployments_admin_router)
     app.include_router(deployments_public_router)

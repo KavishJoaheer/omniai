@@ -15,64 +15,99 @@ logger = logging.getLogger(__name__)
 
 
 class SubprocessSandbox:
-    """Subprocess-based Python sandbox.
+    """Subprocess-based multi-language sandbox.
 
-    Runs the supplied code as a separate Python process with:
-      - a fresh, scrubbed environment (no inherited secrets)
-      - cwd set to a tempdir; deleted after the run
-      - no shell — argv is built directly
-      - asyncio-enforced timeout
-      - artifacts collected from any files the code wrote into the tempdir
+    Supports the following languages via the ``language`` field on
+    ``SandboxRequest``:
 
-    This is NOT a kernel-level sandbox. The child process can still touch the
-    host filesystem outside its tempdir if it really tries (no chroot/seccomp
-    here). For untrusted code in production, swap in a Docker/gVisor backend
-    behind the same `SandboxPort` interface — call sites are unchanged.
+    * ``"python"``     — runs via ``sys.executable -I``
+    * ``"javascript"`` — runs via ``node`` (Node.js must be on PATH)
+    * ``"bash"``       — runs via ``bash`` (POSIX systems only)
 
-    Why this exists: it gives us a usable Code-node-runner today on every OS
-    where Python runs (Win/macOS/Linux) and lets the demo show the contract.
+    Each run gets:
+      - a fresh temporary directory as the working directory
+      - a scrubbed environment (no inherited secrets)
+      - an asyncio-enforced timeout
+      - artifact collection from any files written to the tempdir
+
+    This is NOT a kernel-level sandbox. For untrusted code in production,
+    swap in the Docker or gVisor backend behind the same ``SandboxPort``
+    interface — call sites are unchanged.
     """
 
     name = "subprocess"
 
+    # ── language → (cmd_builder, script_filename) ────────────────────────────
+
+    _SUPPORTED = {"python", "javascript", "bash"}
+
+    def _build_cmd(self, language: str, script_path: Path) -> list[str]:
+        if language == "python":
+            return [sys.executable, "-I", str(script_path)]
+        if language == "javascript":
+            node = shutil.which("node") or shutil.which("nodejs")
+            if node is None:
+                raise FileNotFoundError("node executable not found on PATH")
+            return [node, str(script_path)]
+        if language == "bash":
+            bash = shutil.which("bash")
+            if bash is None:
+                raise FileNotFoundError("bash executable not found on PATH")
+            return [bash, str(script_path)]
+        raise ValueError(f"unsupported language: {language!r}")
+
+    def _script_name(self, language: str) -> str:
+        return {"python": "_run.py", "javascript": "_run.js", "bash": "_run.sh"}.get(language, "_run")
+
     async def run(self, request: SandboxRequest) -> SandboxResult:
-        if request.language != "python":
+        if request.language not in self._SUPPORTED:
             return SandboxResult(
                 exit_code=1,
                 stdout="",
-                stderr=f"unsupported language: {request.language!r}",
+                stderr=f"unsupported language: {request.language!r}. Supported: {', '.join(sorted(self._SUPPORTED))}",
                 duration_seconds=0.0,
             )
 
         workdir = Path(tempfile.mkdtemp(prefix="omniai-sbx-"))
-        # Seed any inputs into /workspace
+        # Seed any inputs into the workdir
         for relative, content in (request.files or {}).items():
             target = workdir / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
 
-        script_path = workdir / "_run.py"
+        script_name = self._script_name(request.language)
+        script_path = workdir / script_name
         script_path.write_text(request.code, encoding="utf-8")
 
-        # Scrubbed environment — only what's strictly needed for Python to run
-        env = {
+        # Scrubbed environment — only minimal vars
+        env: dict[str, str] = {
             "PATH": os.environ.get("PATH", ""),
-            "PYTHONUNBUFFERED": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
             "TMPDIR": str(workdir),
         }
+        if request.language == "python":
+            env["PYTHONUNBUFFERED"] = "1"
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
         if sys.platform == "win32":
-            for required in ("SYSTEMROOT", "SYSTEMDRIVE"):
+            for required in ("SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP"):
                 value = os.environ.get(required)
                 if value:
                     env[required] = value
 
+        try:
+            cmd = self._build_cmd(request.language, script_path)
+        except (FileNotFoundError, ValueError) as exc:
+            shutil.rmtree(workdir, ignore_errors=True)
+            return SandboxResult(
+                exit_code=1,
+                stdout="",
+                stderr=str(exc),
+                duration_seconds=0.0,
+            )
+
         started = time.perf_counter()
         try:
             process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-I",  # isolated mode: ignore PYTHON* env, no user site
-                str(script_path),
+                *cmd,
                 cwd=str(workdir),
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
@@ -106,8 +141,8 @@ class SubprocessSandbox:
         duration = time.perf_counter() - started
 
         # Collect any artifacts the code wrote to the tempdir, EXCLUDING the
-        # _run.py we seeded plus the files we seeded ourselves.
-        seeded = {"_run.py", *(request.files or {}).keys()}
+        # script file we seeded plus the files we seeded ourselves.
+        seeded = {script_name, *(request.files or {}).keys()}
         artifacts: dict[str, bytes] = {}
         for path in workdir.rglob("*"):
             if not path.is_file():
