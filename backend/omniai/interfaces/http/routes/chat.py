@@ -234,6 +234,86 @@ def delete_conversation(
     return {"deleted": conversation_id}
 
 
+# ── M18: Conversation export ─────────────────────────────────────────────────
+
+from fastapi.responses import Response as HttpResponse  # noqa: E402  (local import avoids circular at top)
+
+
+@router.get("/conversations/{conversation_id}/export")
+def export_conversation(
+    conversation_id: str,
+    format: str = "json",  # "json" | "markdown"
+    chat_service: ChatService = Depends(get_chat_service),
+) -> HttpResponse:
+    """Export a full conversation as JSON or Markdown.
+
+    - ``format=json`` → ``application/json``; includes all message metadata.
+    - ``format=markdown`` → ``text/markdown``; human-readable chat transcript.
+    """
+    if format not in ("json", "markdown"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="format must be 'json' or 'markdown'.")
+    try:
+        conv = chat_service.get_conversation(conversation_id)
+        messages = chat_service.list_messages(conversation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    safe_title = "".join(c if c.isalnum() or c in " _-" else "_" for c in conv.title)[:60]
+
+    if format == "json":
+        payload = {
+            "id": conv.id,
+            "title": conv.title,
+            "model_provider": conv.model_provider,
+            "model_name": conv.model_name,
+            "collection_ids": json.loads(conv.collection_ids_json or "[]"),
+            "created_at": conv.created_at.isoformat() if hasattr(conv.created_at, "isoformat") else str(conv.created_at),
+            "messages": [
+                {
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "citations": m.citations,
+                    "created_at": m.created_at.isoformat() if hasattr(m.created_at, "isoformat") else str(m.created_at),
+                }
+                for m in messages
+            ],
+        }
+        body_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        return HttpResponse(
+            content=body_bytes,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{safe_title}.json"'},
+        )
+    else:
+        lines = [f"# {conv.title}", ""]
+        if conv.model_provider and conv.model_name:
+            lines.append(f"*Model: {conv.model_provider}/{conv.model_name}*")
+            lines.append("")
+        for m in messages:
+            role_label = "**You**" if m.role == "user" else "**Assistant**"
+            ts = m.created_at.isoformat() if hasattr(m.created_at, "isoformat") else str(m.created_at)
+            lines.append(f"{role_label} _{ts}_")
+            lines.append("")
+            lines.append(m.content)
+            if m.citations:
+                lines.append("")
+                lines.append("*Sources:*")
+                for c in m.citations:
+                    if isinstance(c, dict):
+                        lines.append(f"  - [{c.get('document_name', 'doc')}] score={c.get('score', ''):.3f}" if isinstance(c.get('score'), float) else f"  - {c.get('document_name', 'doc')}")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+        body_bytes = "\n".join(lines).encode("utf-8")
+        return HttpResponse(
+            content=body_bytes,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{safe_title}.md"'},
+        )
+
+
 @router.post("/chat")
 async def chat(
     body: ChatRequest,

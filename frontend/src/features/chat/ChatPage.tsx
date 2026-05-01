@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Citation, Collection, Conversation, Document, Message, api } from "../../api/client";
+import { downloadBlob } from "../../components/downloadBlob";
 
 type LocalMessage = Pick<Message, "role" | "content" | "citations"> & { id: string };
 
@@ -130,6 +131,17 @@ export function ChatPage() {
       );
       setEditingConversationId("");
       setEditingTitle("");
+    } catch (caught) {
+      setError(toMessage(caught));
+    }
+  }
+
+  async function exportConversation(id: string, fmt: "json" | "markdown") {
+    setError("");
+    try {
+      const blob = await api.exportConversation(id, fmt);
+      const ext = fmt === "json" ? "json" : "md";
+      downloadBlob(blob, `conversation-${id.slice(0, 8)}.${ext}`);
     } catch (caught) {
       setError(toMessage(caught));
     }
@@ -267,6 +279,26 @@ export function ChatPage() {
           <h2>{activeConversation?.title || "RAG chat"}</h2>
         </div>
         <div className="button-row">
+          {conversationId && (
+            <>
+              <button
+                className="secondary-button small-button"
+                type="button"
+                onClick={() => exportConversation(conversationId, "markdown")}
+                title="Export as Markdown"
+              >
+                ↓ MD
+              </button>
+              <button
+                className="secondary-button small-button"
+                type="button"
+                onClick={() => exportConversation(conversationId, "json")}
+                title="Export as JSON"
+              >
+                ↓ JSON
+              </button>
+            </>
+          )}
           <button className="secondary-button" type="button" onClick={regenerate} disabled={!latestAssistant || streaming}>
             Regenerate
           </button>
@@ -318,6 +350,14 @@ export function ChatPage() {
                         }}
                       >
                         Rename
+                      </button>
+                      <button
+                        className="secondary-button small-button"
+                        type="button"
+                        onClick={() => exportConversation(conversation.id, "markdown")}
+                        title="Export as Markdown"
+                      >
+                        Export
                       </button>
                       <button className="danger-button small-button" type="button" onClick={() => deleteConversation(conversation)}>
                         Delete

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Agent, AgentRun, ApiError, Collection, api } from "../../api/client";
+import { downloadBlob } from "../../components/downloadBlob";
 
 type AgentNode = NonNullable<Agent["definition"]["nodes"]>[number];
 type AgentNodeType = "start" | "retrieval" | "generate" | "message" | "code" | "end";
@@ -198,6 +199,18 @@ export function AgentsPage() {
       setError(toErrorMessage(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportRun(runId: string, fmt: "json" | "markdown") {
+    if (!agentId) return;
+    setError("");
+    try {
+      const blob = await api.exportAgentRun(agentId, runId, fmt);
+      const ext = fmt === "json" ? "json" : "md";
+      downloadBlob(blob, `agent-run-${runId.slice(0, 8)}.${ext}`);
+    } catch (caught) {
+      setError(toErrorMessage(caught));
     }
   }
 
@@ -519,7 +532,29 @@ export function AgentsPage() {
             </article>
 
             <article className="panel stack">
-              <h3>Latest output</h3>
+              <div className="section-heading">
+                <h3>Latest output</h3>
+                {latestRun && (
+                  <div className="button-row">
+                    <button
+                      className="secondary-button small-button"
+                      type="button"
+                      onClick={() => exportRun(latestRun.id, "markdown")}
+                      title="Export run as Markdown"
+                    >
+                      ↓ MD
+                    </button>
+                    <button
+                      className="secondary-button small-button"
+                      type="button"
+                      onClick={() => exportRun(latestRun.id, "json")}
+                      title="Export run as JSON"
+                    >
+                      ↓ JSON
+                    </button>
+                  </div>
+                )}
+              </div>
               {latestRun ? (
                 <>
                   <span className={`status-pill ${latestRun.status === "COMPLETED" ? "ready" : ""}`}>

@@ -24,6 +24,63 @@ collection_router = APIRouter(prefix="/v1/collections/{collection_id}/documents"
 document_router = APIRouter(prefix="/v1/documents", tags=["documents"])
 
 
+# ── M18: Bulk operations ─────────────────────────────────────────────────────
+
+class BulkDocumentRequest(BaseModel):
+    """Batch action on a list of document IDs.
+
+    Actions:
+    - ``delete``   — permanently remove each document.
+    - ``set_tags`` — replace tags on each document with ``tags``.
+    - ``reindex``  — re-enqueue each document for re-indexing.
+    """
+    document_ids: list[str] = Field(min_length=1, max_length=100)
+    action: str = Field(pattern="^(delete|set_tags|reindex)$")
+    tags: list[str] = Field(default_factory=list, max_length=20)   # for set_tags
+
+
+@document_router.post("/bulk", status_code=status.HTTP_200_OK)
+async def bulk_document_action(
+    body: BulkDocumentRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    ingestion: IngestionService = Depends(get_ingestion_service),
+    search_engine=Depends(get_search_engine),
+    queue: JobQueuePort = Depends(get_job_queue),
+    principal=Depends(get_current_principal),
+) -> dict:
+    """Apply an action to multiple documents in one request.
+
+    Returns ``{succeeded: [...], failed: {...}}`` so callers can surface
+    per-document errors without aborting the whole batch.
+    """
+    assert_permission(principal.role, Perm.DOCUMENTS_WRITE)
+    succeeded: list[str] = []
+    failed: dict[str, str] = {}
+
+    for doc_id in body.document_ids:
+        try:
+            if body.action == "delete":
+                ingestion.delete_document(document_id=doc_id, search_engine=search_engine)
+            elif body.action == "set_tags":
+                service.set_document_tags(document_id=doc_id, tags=body.tags)
+            elif body.action == "reindex":
+                doc = service.get_document(doc_id)
+                if doc.parsed_text_key is None:
+                    raise ValueError("Document has no parsed text to re-index.")
+                service.update_document_status(doc_id, "PARSED")
+                await queue.enqueue(
+                    job_name=INDEX_JOB_NAME,
+                    payload={"tenant_id": principal.tenant_id, "document_id": doc_id},
+                )
+            succeeded.append(doc_id)
+        except KeyError as exc:
+            failed[doc_id] = f"not found: {exc}"
+        except (ValueError, Exception) as exc:
+            failed[doc_id] = str(exc)[:200]
+
+    return ok({"succeeded": succeeded, "failed": failed, "action": body.action})
+
+
 class ReindexRequest(BaseModel):
     chunk_template: str | None = Field(default=None, max_length=64)
     embedding_model: str | None = Field(default=None, max_length=128)

@@ -290,7 +290,7 @@ export type Connector = {
   id: string;
   collection_id: string;
   name: string;
-  kind: "local_folder" | "s3" | "web_crawler";
+  kind: "local_folder" | "s3" | "web_crawler" | "google_drive" | "sharepoint" | "notion" | "confluence" | "slack" | "database";
   config: Record<string, unknown>;
   enabled: boolean;
   sync_interval_seconds: number;
@@ -666,6 +666,38 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ code, timeout_seconds: timeoutSeconds, files }),
     }),
+
+  // ── M18: Bulk document operations ────────────────────────────────────────
+  bulkDocuments: (payload: {
+    document_ids: string[];
+    action: "delete" | "set_tags" | "reindex";
+    tags?: string[];
+  }) =>
+    request<{ succeeded: string[]; failed: Record<string, string>; action: string }>(
+      "/v1/documents/bulk",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+
+  // ── M18: Conversation export ──────────────────────────────────────────────
+  /** Returns the raw Response so the caller can handle filename + download. */
+  exportConversation: async (conversationId: string, format: "json" | "markdown"): Promise<Blob> => {
+    const response = await fetch(
+      `/v1/conversations/${conversationId}/export?format=${format}`,
+      { credentials: "include" }
+    );
+    if (!response.ok) throw new ApiError(await responseError(response), response.status);
+    return response.blob();
+  },
+
+  // ── M18: Agent run export ─────────────────────────────────────────────────
+  exportAgentRun: async (agentId: string, runId: string, format: "json" | "markdown"): Promise<Blob> => {
+    const response = await fetch(
+      `/v1/agents/${agentId}/runs/${runId}/export?format=${format}`,
+      { credentials: "include" }
+    );
+    if (!response.ok) throw new ApiError(await responseError(response), response.status);
+    return response.blob();
+  },
 };
 
 export const sendChatMessage = api.chat;

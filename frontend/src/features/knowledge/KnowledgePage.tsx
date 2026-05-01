@@ -1,10 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Chunk, Collection, Connector, Document, DocumentStatus, GraphTriple, api } from "../../api/client";
+import { useI18n } from "../../i18n";
 
 const chunkTemplates = ["general", "qa", "small-to-big", "sentence-window"];
 
 export function KnowledgePage() {
+  const { t } = useI18n();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [chunks, setChunks] = useState<Chunk[]>([]);
@@ -24,6 +26,9 @@ export function KnowledgePage() {
   const [newConnectorName, setNewConnectorName] = useState("");
   const [newConnectorConfig, setNewConnectorConfig] = useState('{"urls": ["https://example.com/docs/"], "depth": 1, "max_pages": 30}');
   const [showConnectorForm, setShowConnectorForm] = useState(false);
+
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+  const [bulkTagDraft, setBulkTagDraft] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -348,6 +353,33 @@ export function KnowledgePage() {
     }
   }
 
+  async function bulkAction(action: "delete" | "reindex" | "set_tags") {
+    if (selectedDocIds.size === 0) return;
+    if (action === "delete" && !window.confirm(`Delete ${selectedDocIds.size} document(s)?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const tags = action === "set_tags"
+        ? bulkTagDraft.split(",").map((t) => t.trim()).filter(Boolean)
+        : [];
+      const result = await api.bulkDocuments({
+        document_ids: Array.from(selectedDocIds),
+        action,
+        tags,
+      });
+      const s = result.succeeded?.length ?? 0;
+      const f = Object.keys(result.failed ?? {}).length;
+      setNotice(`Bulk ${action}: ${s} succeeded${f ? `, ${f} failed` : ""}.`);
+      setSelectedDocIds(new Set());
+      setBulkTagDraft("");
+      if (selectedCollectionId) await refreshDocuments(selectedCollectionId, tagFilter);
+    } catch (caught) {
+      setError(toMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleFiles(files: File[]) {
     if (!selectedCollectionId || files.length === 0) return;
     setUploadFiles(files.slice(0, 20));
@@ -601,10 +633,65 @@ export function KnowledgePage() {
                 Upload {uploadFiles.length > 1 ? `${uploadFiles.length} files` : ""}
               </button>
             </form>
+            {selectedDocIds.size > 0 && (
+              <div className="bulk-bar" role="region" aria-label="Bulk actions">
+                <span>{selectedDocIds.size} selected</span>
+                <button
+                  type="button"
+                  className="secondary-button small-button"
+                  disabled={busy}
+                  onClick={() => bulkAction("reindex")}
+                >
+                  Re-index selected
+                </button>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    placeholder="tag-a, tag-b"
+                    value={bulkTagDraft}
+                    onChange={(e) => setBulkTagDraft(e.target.value)}
+                    style={{ width: 140 }}
+                    aria-label="Tags to set on selected documents"
+                  />
+                  <button
+                    type="button"
+                    className="secondary-button small-button"
+                    disabled={busy || !bulkTagDraft.trim()}
+                    onClick={() => bulkAction("set_tags")}
+                  >
+                    Set tags
+                  </button>
+                </span>
+                <button
+                  type="button"
+                  className="danger-button small-button"
+                  disabled={busy}
+                  onClick={() => bulkAction("delete")}
+                >
+                  Delete selected
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button small-button"
+                  onClick={() => setSelectedDocIds(new Set())}
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all documents"
+                        checked={documents.length > 0 && selectedDocIds.size === documents.length}
+                        onChange={(e) => {
+                          setSelectedDocIds(e.target.checked ? new Set(documents.map((d) => d.id)) : new Set());
+                        }}
+                      />
+                    </th>
                     <th>Name</th>
                     <th>Tags</th>
                     <th>Status</th>
@@ -620,6 +707,20 @@ export function KnowledgePage() {
                       key={document.id}
                       onClick={() => setSelectedDocumentId(document.id)}
                     >
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${document.name}`}
+                          checked={selectedDocIds.has(document.id)}
+                          onChange={(e) => {
+                            setSelectedDocIds((prev) => {
+                              const next = new Set(prev);
+                              e.target.checked ? next.add(document.id) : next.delete(document.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      </td>
                       <td>{document.name}</td>
                       <td>
                         <div className="tag-editor">
