@@ -85,6 +85,24 @@ class Settings(BaseSettings):
     llm_cost_per_1k_prompt: float = Field(default=0.002, alias="LLM_COST_PER_1K_PROMPT")
     llm_cost_per_1k_completion: float = Field(default=0.006, alias="LLM_COST_PER_1K_COMPLETION")
 
+    # M17 — Connector Library: default credential env-vars (connectors can also
+    # embed credentials directly in their config dict stored per-connector in DB).
+    # Google Drive (service account JSON as a single-line string)
+    gdrive_service_account_json: str | None = Field(default=None, alias="GDRIVE_SERVICE_ACCOUNT_JSON")
+    # SharePoint / OneDrive — Azure AD app credentials
+    sharepoint_tenant_id: str | None = Field(default=None, alias="SHAREPOINT_TENANT_ID")
+    sharepoint_client_id: str | None = Field(default=None, alias="SHAREPOINT_CLIENT_ID")
+    sharepoint_client_secret: str | None = Field(default=None, alias="SHAREPOINT_CLIENT_SECRET")
+    # Notion integration token
+    notion_api_key: str | None = Field(default=None, alias="NOTION_API_KEY")
+    # Confluence
+    confluence_base_url: str | None = Field(default=None, alias="CONFLUENCE_BASE_URL")
+    confluence_api_token: str | None = Field(default=None, alias="CONFLUENCE_API_TOKEN")
+    # Slack bot token
+    slack_bot_token: str | None = Field(default=None, alias="SLACK_BOT_TOKEN")
+    # Connector preview max items cap (server-side hard limit)
+    connector_preview_max_items: int = Field(default=20, alias="CONNECTOR_PREVIEW_MAX_ITEMS")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

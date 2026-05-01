@@ -8,8 +8,14 @@ from typing import AsyncIterator
 
 from omniai.application.ingestion_service import IngestionService
 from omniai.connectors.base import ConnectorAdapter, hash_content
+from omniai.connectors.confluence import ConfluenceConnector
+from omniai.connectors.database import DatabaseConnector
+from omniai.connectors.google_drive import GoogleDriveConnector
 from omniai.connectors.local_folder import LocalFolderConnector
+from omniai.connectors.notion import NotionConnector
 from omniai.connectors.s3 import S3Connector
+from omniai.connectors.sharepoint import SharePointConnector
+from omniai.connectors.slack import SlackConnector
 from omniai.connectors.webcrawler import WebCrawlerConnector
 from omniai.domain.connectors.models import Connector, ConnectorSyncReport
 from omniai.ports.connectors import ConnectorStorePort
@@ -87,25 +93,66 @@ def build_sync_lock(redis_url: str | None):
     return _InProcessSyncLock()
 
 
+_ADAPTER_REGISTRY: dict[str, type] = {
+    "local_folder": LocalFolderConnector,
+    "s3": S3Connector,
+    "web_crawler": WebCrawlerConnector,
+    # M17 — extended connector library
+    "google_drive": GoogleDriveConnector,
+    "sharepoint": SharePointConnector,
+    "notion": NotionConnector,
+    "confluence": ConfluenceConnector,
+    "slack": SlackConnector,
+    "database": DatabaseConnector,
+}
+
+#: Sorted list of all supported connector kind strings (used in route validation).
+SUPPORTED_KINDS: list[str] = sorted(_ADAPTER_REGISTRY.keys())
+
+
 def _build_adapter(kind: str) -> ConnectorAdapter:
-    if kind == "local_folder":
-        return LocalFolderConnector()
-    if kind == "s3":
-        return S3Connector()
-    if kind == "web_crawler":
-        return WebCrawlerConnector()
-    raise ValueError(f"Unknown connector kind: {kind!r}")
+    cls = _ADAPTER_REGISTRY.get(kind)
+    if cls is None:
+        raise ValueError(f"Unknown connector kind: {kind!r}. Supported: {SUPPORTED_KINDS}")
+    return cls()
 
 
 def _validate_config(kind: str, config: dict) -> None:
-    if kind == "local_folder":
-        LocalFolderConnector.validate_config(config)
-    elif kind == "s3":
-        S3Connector.validate_config(config)
-    elif kind == "web_crawler":
-        WebCrawlerConnector.validate_config(config)
-    else:
-        raise ValueError(f"Unknown connector kind: {kind!r}")
+    cls = _ADAPTER_REGISTRY.get(kind)
+    if cls is None:
+        raise ValueError(f"Unknown connector kind: {kind!r}. Supported: {SUPPORTED_KINDS}")
+    cls.validate_config(config)
+
+
+async def preview_connector(kind: str, config: dict, max_items: int = 5) -> list[dict]:
+    """Dry-run a connector: return a sample of what *would* be ingested.
+
+    Returns a list of dicts with keys: source_id, filename, mime_type,
+    size_bytes, content_preview (first 500 chars decoded as UTF-8).
+    Never writes anything to the database or object store.
+    """
+    _validate_config(kind, config)
+    adapter = _build_adapter(kind)
+    results: list[dict] = []
+
+    async for discovered in adapter.discover(config):
+        preview_text = ""
+        try:
+            preview_text = discovered.content[:2000].decode("utf-8", errors="replace")
+        except Exception:
+            pass
+
+        results.append({
+            "source_id": discovered.source_id,
+            "filename": discovered.filename,
+            "mime_type": discovered.mime_type,
+            "size_bytes": len(discovered.content),
+            "content_preview": preview_text[:500],
+        })
+        if len(results) >= max_items:
+            break
+
+    return results
 
 
 class ConnectorService:

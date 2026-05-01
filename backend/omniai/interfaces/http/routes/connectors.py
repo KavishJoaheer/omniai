@@ -10,7 +10,7 @@ from omniai.adapters.relational.sqlalchemy.repositories import (
     SqlAlchemyConnectorStore,
 )
 from omniai.application.auth_service import AuthenticatedPrincipal
-from omniai.application.connector_service import ConnectorService
+from omniai.application.connector_service import ConnectorService, SUPPORTED_KINDS, preview_connector
 from omniai.application.ingestion_service import IngestionService
 from omniai.interfaces.http.deps import (
     get_current_principal,
@@ -42,9 +42,15 @@ class ConnectorOut(BaseModel):
 class CreateConnectorRequest(BaseModel):
     collection_id: str
     name: str = Field(min_length=1, max_length=128)
-    kind: str = Field(pattern="^(local_folder|s3|web_crawler)$")
+    kind: str  # validated at service layer via _validate_config / SUPPORTED_KINDS
     config: dict
     sync_interval_seconds: int = Field(default=300, ge=30, le=86400)
+
+
+class PreviewRequest(BaseModel):
+    kind: str
+    config: dict
+    max_items: int = Field(default=5, ge=1, le=20)
 
 
 class UpdateConnectorRequest(BaseModel):
@@ -91,6 +97,43 @@ def list_connectors(
     items = service.list(collection_id=collection_id)
     return ok([_to_out(c).model_dump(mode="json") for c in items])
 
+
+# ── Static sub-paths MUST be declared before /{connector_id} ────────────────
+
+@router.get("/kinds")
+def list_connector_kinds(
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+) -> dict:
+    """Return the list of supported connector kind strings."""
+    assert_permission(principal.role, Perm.DOCUMENTS_READ)
+    return ok(SUPPORTED_KINDS)
+
+
+@router.post("/preview")
+async def dry_run_preview(
+    body: PreviewRequest,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+) -> dict:
+    """Dry-run a connector config and return a sample of what would be ingested.
+
+    Does **not** write anything to the database or object store.
+    Returns up to ``max_items`` file previews (source_id, filename,
+    mime_type, size_bytes, content_preview).
+    """
+    assert_permission(principal.role, Perm.DOCUMENTS_WRITE)
+    try:
+        items = await preview_connector(body.kind, body.config, body.max_items)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Connector preview failed: {exc}",
+        ) from exc
+    return ok({"items": items, "count": len(items)})
+
+
+# ── Parameterised paths ──────────────────────────────────────────────────────
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_connector(
@@ -204,3 +247,5 @@ async def trigger_sync(
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return ok(report.model_dump(mode="json"))
+
+
