@@ -234,6 +234,48 @@ def delete_conversation(
     return {"deleted": conversation_id}
 
 
+# ── M19: Conversation fork/branch ────────────────────────────────────────────
+
+class ForkConversationRequest(BaseModel):
+    fork_at_message_id: str | None = None
+    title: str | None = None
+
+
+@router.post("/conversations/{conversation_id}/fork", response_model=ConversationOut, status_code=status.HTTP_201_CREATED)
+def fork_conversation(
+    conversation_id: str,
+    body: ForkConversationRequest,
+    chat_service: ChatService = Depends(get_chat_service),
+) -> ConversationOut:
+    """Fork a conversation at an optional message boundary.
+
+    Creates a new conversation that contains the same messages as the source
+    up to (and including) ``fork_at_message_id``.  If ``fork_at_message_id`` is
+    omitted, all messages are copied.
+
+    Returns the new conversation summary.
+    """
+    try:
+        forked = chat_service.fork_conversation(
+            conversation_id,
+            fork_at_message_id=body.fork_at_message_id,
+            new_title=body.title,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    summary = chat_service._summary(forked)
+    return ConversationOut(
+        id=summary.id,
+        title=summary.title,
+        model_provider=summary.model_provider,
+        model_name=summary.model_name,
+        collection_ids=summary.collection_ids,
+        pinned=summary.pinned,
+        created_at=summary.created_at,
+        updated_at=summary.updated_at,
+    )
+
+
 # ── M18: Conversation export ─────────────────────────────────────────────────
 
 from fastapi.responses import Response as HttpResponse  # noqa: E402  (local import avoids circular at top)

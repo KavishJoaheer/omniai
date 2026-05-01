@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 from omniai.ports.embedding_provider import EmbeddingProviderPort
+from omniai.ports.llm_provider import LlmMessage, LlmProviderPort
 from omniai.ports.relational import KnowledgeStorePort
 from omniai.ports.reranker import RerankCandidate, RerankerPort
 from omniai.ports.search_engine import SearchEnginePort, SearchHit
@@ -24,6 +25,12 @@ class RetrievalRequest:
     document_ids: list[str] | None = None
     embedding_model: str = "nomic-embed-text"
     rerank: bool = True
+    # M19 — HyDE (Hypothetical Document Embeddings)
+    # When True the retrieval service generates a short hypothetical answer and
+    # embeds it instead of the raw query.  The blended query vector is used for
+    # the ANN look-up while the original query string is kept for BM25.
+    hyde: bool = False
+    hyde_model: str = ""  # empty → use whatever LLM is wired in
 
 
 @dataclass(slots=True)
@@ -44,6 +51,7 @@ class RetrievalService:
         reranker: RerankerPort | None = None,
         cache: RetrievalCachePort | None = None,
         cache_ttl: int = 0,
+        llm_provider: LlmProviderPort | None = None,
     ) -> None:
         self._search = search_engine
         self._embeddings = embedding_provider
@@ -52,6 +60,7 @@ class RetrievalService:
         self._reranker = reranker
         self._cache = cache
         self._cache_ttl = cache_ttl
+        self._llm = llm_provider
 
     # ------------------------------------------------------------------
     # Cache key helpers
@@ -68,6 +77,7 @@ class RetrievalService:
             "vw": round(request.vector_weight, 4),
             "model": request.embedding_model,
             "rerank": request.rerank,
+            "hyde": request.hyde,
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return "ret:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -89,8 +99,19 @@ class RetrievalService:
                     logger.debug("Retrieval cache HIT key=%s", cache_key)
                     return result
 
+        # ── HyDE: Hypothetical Document Embeddings ────────────────────
+        embed_text = request.query
+        if request.hyde and self._llm is not None:
+            try:
+                hypothetical = await self._generate_hypothetical_doc(request.query, request.hyde_model)
+                if hypothetical.strip():
+                    # Blend original query + hypothetical answer for the vector
+                    embed_text = f"{request.query}\n\n{hypothetical}"
+            except Exception:
+                pass  # Graceful fallback to raw query
+
         try:
-            vectors = await self._embeddings.embed(model=request.embedding_model, inputs=[request.query])
+            vectors = await self._embeddings.embed(model=request.embedding_model, inputs=[embed_text])
             query_vector = vectors[0]
         except Exception:
             query_vector = []
@@ -146,6 +167,41 @@ class RetrievalService:
                 logger.debug("Retrieval cache SET key=%s ttl=%ds", cache_key, self._cache_ttl)
 
         return response
+
+    async def _generate_hypothetical_doc(self, query: str, model: str) -> str:
+        """Generate a short hypothetical answer (HyDE) for the given query.
+
+        The LLM is instructed to write a concise excerpt that *would* appear in
+        a document that answers the question.  We then embed this instead of the
+        raw query to improve dense-retrieval recall for factoid questions.
+        """
+        if self._llm is None:
+            return ""
+        prompt = (
+            "Write a short paragraph (3-5 sentences) that would appear in a document "
+            f"answering the following question. Do not add a preamble; just write the passage.\n\n"
+            f"Question: {query}"
+        )
+        messages = [LlmMessage(role="user", content=prompt)]
+        # Try the first available model if none specified
+        try:
+            available = await self._llm.list_models()
+            target_model = model or (available[0] if available else "")
+        except Exception:
+            target_model = model
+
+        if not target_model:
+            return ""
+
+        chunks: list[str] = []
+        try:
+            async for chunk in self._llm.stream_chat(model=target_model, messages=messages, max_tokens=200):
+                chunks.append(chunk.delta)
+                if chunk.finish_reason:
+                    break
+        except Exception:
+            return ""
+        return "".join(chunks)
 
     async def _rerank(
         self,

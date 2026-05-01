@@ -2,10 +2,27 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
 from omniai.ports.llm_provider import LlmCompletionChunk, LlmMessage
+
+
+@dataclass
+class ToolCall:
+    """Represents a function/tool call returned by the model."""
+    name: str
+    arguments: dict
+
+
+@dataclass
+class ToolCallResult:
+    """Text result to inject back as a tool response."""
+    tool_call_id: str
+    name: str
+    content: str
 
 
 class OpenAILlmProvider:
@@ -70,3 +87,76 @@ class OpenAILlmProvider:
                     finish = choice.get("finish_reason")
                     if delta or finish:
                         yield LlmCompletionChunk(delta=delta or "", finish_reason=finish)
+
+    async def chat_with_tools(
+        self,
+        *,
+        model: str,
+        messages: list[LlmMessage],
+        tools: list[dict],
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        max_tool_rounds: int = 5,
+    ) -> tuple[str, list[ToolCall]]:
+        """Non-streaming chat with OpenAI function/tool calling.
+
+        Runs an agentic loop:
+          1. Send messages + tool definitions to the model.
+          2. If the model invokes a tool, yield the ToolCall; caller must supply
+             the result via the returned list.  (Currently processes one round
+             internally — callers that want multi-round should call repeatedly.)
+          3. When the model emits a final text response, return it.
+
+        Returns ``(final_text, all_tool_calls_made)`` after the loop completes.
+        """
+        target_model = model or self._default_model or self.DEFAULT_MODELS[0]
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        history: list[dict] = [{"role": m.role, "content": m.content} for m in messages]
+        all_tool_calls: list[ToolCall] = []
+
+        for _ in range(max_tool_rounds):
+            payload: dict[str, Any] = {
+                "model": target_model,
+                "messages": history,
+                "temperature": temperature,
+                "tools": tools,
+                "tool_choice": "auto",
+            }
+            if max_tokens:
+                payload["max_tokens"] = max_tokens
+
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            choice = (data.get("choices") or [{}])[0]
+            finish_reason = choice.get("finish_reason", "stop")
+            msg = choice.get("message", {})
+            raw_tool_calls = msg.get("tool_calls") or []
+
+            if not raw_tool_calls or finish_reason == "stop":
+                return msg.get("content") or "", all_tool_calls
+
+            # Process tool calls
+            history.append(msg)  # assistant message with tool_calls
+            for tc in raw_tool_calls:
+                fn = tc.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    args = {}
+                tool_call = ToolCall(name=fn.get("name", ""), arguments=args)
+                all_tool_calls.append(tool_call)
+                # Append a placeholder tool result — callers should override this
+                history.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": json.dumps({"note": "Tool result pending — implement tool handler."}),
+                })
+
+        return "", all_tool_calls

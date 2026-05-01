@@ -103,6 +103,21 @@ class Settings(BaseSettings):
     # Connector preview max items cap (server-side hard limit)
     connector_preview_max_items: int = Field(default=20, alias="CONNECTOR_PREVIEW_MAX_ITEMS")
 
+    # M19 — Advanced Retrieval
+    # HyDE: use a generative model to produce a hypothetical document before retrieval
+    hyde_enabled: bool = Field(default=False, alias="HYDE_ENABLED")
+    hyde_model: str = Field(default="", alias="HYDE_MODEL")  # "" = use collection default
+    # pgvector adapter (SEARCH_KIND=pgvector uses DB_URL)
+    pgvector_table: str = Field(default="omniai_vectors", alias="PGVECTOR_TABLE")
+    # Pinecone adapter
+    pinecone_api_key: str | None = Field(default=None, alias="PINECONE_API_KEY")
+    pinecone_environment: str = Field(default="us-east-1-aws", alias="PINECONE_ENVIRONMENT")
+    pinecone_index_name: str = Field(default="omniai", alias="PINECONE_INDEX_NAME")
+    # Weaviate adapter
+    weaviate_url: str = Field(default="http://localhost:8080", alias="WEAVIATE_URL")
+    weaviate_api_key: str | None = Field(default=None, alias="WEAVIATE_API_KEY")
+    weaviate_class_name: str = Field(default="OmniAIChunk", alias="WEAVIATE_CLASS_NAME")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

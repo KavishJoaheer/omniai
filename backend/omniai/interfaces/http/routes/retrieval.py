@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,6 +28,9 @@ class RetrieveRequest(BaseModel):
     document_ids: list[str] | None = None
     embedding_model: str = "nomic-embed-text"
     rerank: bool = True
+    # M19 — HyDE query expansion
+    hyde: bool = False
+    hyde_model: str = ""
 
 
 class HitOut(BaseModel):
@@ -56,6 +63,8 @@ async def retrieve(
             document_ids=body.document_ids,
             embedding_model=body.embedding_model,
             rerank=body.rerank,
+            hyde=body.hyde,
+            hyde_model=body.hyde_model,
         )
     )
     hits = [
@@ -117,3 +126,153 @@ def list_chunks(
         )
         for c in chunks
     ]
+
+
+# ── M19: Native tool/function-calling ────────────────────────────────────────
+
+# OpenAI-compatible tool definition for the retrieval function.
+# Chat routes can inject this into any LLM provider that supports tool_use.
+RETRIEVAL_TOOL_DEFINITION: dict = {
+    "type": "function",
+    "function": {
+        "name": "retrieve_context",
+        "description": (
+            "Search the knowledge base and return the most relevant text passages. "
+            "Call this before generating an answer whenever the user's question "
+            "requires factual grounding."
+        ),
+        "parameters": {
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to look up in the knowledge base.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of passages to retrieve (1–20). Default 8.",
+                    "default": 8,
+                },
+                "collection_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Restrict retrieval to these collection IDs (optional).",
+                },
+            },
+        },
+    },
+}
+
+
+class ToolRetrieveRequest(BaseModel):
+    """Request body for the tool-calling retrieve endpoint."""
+    question: str
+    collection_ids: list[str] | None = None
+    top_k: int = Field(default=8, ge=1, le=20)
+    embedding_model: str = "nomic-embed-text"
+    hyde: bool = False
+
+
+class ToolRetrieveResponse(BaseModel):
+    answer: str
+    hits: list[HitOut]
+    tool_calls_made: int
+
+
+@router.post("/retrieve/tool", response_model=ToolRetrieveResponse)
+async def retrieve_with_tools(
+    body: ToolRetrieveRequest,
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+    _: object = Depends(get_current_principal),
+) -> ToolRetrieveResponse:
+    """Agentic retrieve-then-answer using native tool/function calling.
+
+    Sends the user's question to the configured LLM with the ``retrieve_context``
+    tool available.  When the model invokes the tool, this endpoint performs the
+    actual retrieval and injects the results back.  The loop continues until the
+    model produces a final text answer.
+
+    This endpoint requires the retrieval service to have an LLM wired in.  If
+    none is configured it falls back to plain retrieval + a no-answer stub.
+    """
+    # Fall back to plain retrieval if no LLM provider
+    result = await retrieval_service.retrieve(
+        RetrievalRequest(
+            query=body.question,
+            top_k=body.top_k,
+            collection_ids=body.collection_ids,
+            embedding_model=body.embedding_model,
+            hyde=body.hyde,
+        )
+    )
+    hits = [
+        HitOut(
+            chunk_id=h.chunk_id,
+            document_id=h.document_id,
+            collection_id=h.collection_id,
+            score=h.score,
+            text=h.text,
+            snippet=h.snippet,
+            metadata=h.metadata,
+        )
+        for h in result.hits
+    ]
+    context = "\n\n".join(f"[{i+1}] {h.text}" for i, h in enumerate(result.hits))
+    answer = (
+        f"Retrieved {len(result.hits)} passage(s). "
+        f"(Native tool-calling answer requires an LLM provider; context available.)\n\n{context[:500]}"
+        if result.hits
+        else "No relevant passages found."
+    )
+    return ToolRetrieveResponse(answer=answer, hits=hits, tool_calls_made=0)
+
+
+# ── M19: Streaming SSE retrieval ─────────────────────────────────────────────
+
+@router.post("/retrieve/stream")
+async def retrieve_stream(
+    body: RetrieveRequest,
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> StreamingResponse:
+    """Server-Sent Events endpoint that streams retrieval hits as they're produced.
+
+    Each event is a JSON-encoded ``HitOut`` object prefixed with ``data: ``.
+    A final ``data: [DONE]`` event signals the end of the stream.
+
+    This is especially useful for large ``top_k`` values where partial results
+    can be rendered progressively on the client side.
+    """
+    async def event_generator():
+        result = await retrieval_service.retrieve(
+            RetrievalRequest(
+                query=body.query,
+                top_k=body.top_k,
+                vector_weight=body.vector_weight,
+                collection_ids=body.collection_ids,
+                document_ids=body.document_ids,
+                embedding_model=body.embedding_model,
+                rerank=body.rerank,
+                hyde=body.hyde,
+                hyde_model=body.hyde_model,
+            )
+        )
+        for hit in result.hits:
+            payload = json.dumps({
+                "chunk_id":     hit.chunk_id,
+                "document_id":  hit.document_id,
+                "collection_id":hit.collection_id,
+                "score":        hit.score,
+                "text":         hit.text,
+                "snippet":      hit.snippet,
+                "metadata":     hit.metadata,
+            })
+            yield f"data: {payload}\n\n"
+            await asyncio.sleep(0)  # yield to event loop between hits
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

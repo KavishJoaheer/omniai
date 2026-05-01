@@ -13,6 +13,7 @@ from omniai.adapters.relational.sqlalchemy.models import (
     CollectionRecord,
     ConversationRecord,
     MessageRecord,
+    generate_prefixed_id,
 )
 from omniai.application.retrieval_service import (
     RetrievalRequest,
@@ -215,6 +216,74 @@ class ChatService:
             self._session.delete(msg)
         self._session.delete(record)
         self._session.commit()
+
+    def fork_conversation(
+        self,
+        conversation_id: str,
+        *,
+        fork_at_message_id: str | None = None,
+        new_title: str | None = None,
+    ) -> ConversationRecord:
+        """Fork a conversation, optionally at a specific message.
+
+        Creates a new conversation that is a copy of the source up to (and
+        including) ``fork_at_message_id``.  If ``fork_at_message_id`` is None,
+        all messages are copied.
+
+        Returns the new :class:`ConversationRecord`.
+        """
+        source = self.get_conversation(conversation_id)
+
+        # Determine which messages to copy
+        all_msgs = list(self._session.scalars(
+            select(MessageRecord)
+            .where(MessageRecord.conversation_id == conversation_id)
+            .order_by(MessageRecord.created_at.asc())
+        ))
+
+        if fork_at_message_id:
+            cutoff_ids = [m.id for m in all_msgs]
+            try:
+                cutoff_index = cutoff_ids.index(fork_at_message_id)
+            except ValueError as exc:
+                raise KeyError(f"Message {fork_at_message_id!r} not found in conversation.") from exc
+            msgs_to_copy = all_msgs[: cutoff_index + 1]
+        else:
+            msgs_to_copy = all_msgs
+
+        # Create forked conversation
+        forked = ConversationRecord(
+            id=generate_prefixed_id("cnv"),
+            tenant_id=source.tenant_id,
+            user_id=source.user_id,
+            title=new_title or f"Fork of {source.title}"[:255],
+            system_prompt=source.system_prompt,
+            collection_ids_json=source.collection_ids_json,
+            model_provider=source.model_provider,
+            model_name=source.model_name,
+            temperature=source.temperature,
+            top_k=source.top_k,
+            vector_weight=source.vector_weight,
+        )
+        self._session.add(forked)
+        self._session.flush()
+
+        # Copy messages
+        for msg in msgs_to_copy:
+            new_msg = MessageRecord(
+                id=generate_prefixed_id("msg"),
+                conversation_id=forked.id,
+                role=msg.role,
+                content=msg.content,
+                citations_json=msg.citations_json,
+                created_at=msg.created_at,
+            )
+            self._session.add(new_msg)
+
+        forked.updated_at = utc_now()
+        self._session.commit()
+        self._session.refresh(forked)
+        return forked
 
     def list_messages(self, conversation_id: str) -> list[StoredMessage]:
         self.get_conversation(conversation_id)
