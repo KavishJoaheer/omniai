@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
 import { HomePage } from "../features/home/HomePage";
 import { KnowledgePage } from "../features/knowledge/KnowledgePage";
@@ -8,11 +8,13 @@ import { AgentsPage } from "../features/agents/AgentsPage";
 import { SearchPage } from "../features/search/SearchPage";
 import { AdminPage } from "../features/admin/AdminPage";
 import { DeploymentsPage } from "../features/deployments/DeploymentsPage";
-import { ApiError, Principal, api } from "../api/client";
+import { ApiError, Principal, Provider, api } from "../api/client";
 import { CommandPalette } from "../components/CommandPalette";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { ToastProvider } from "../components/Toast";
 import { useI18n, setI18nStore } from "../i18n";
 
-// ── Theme persistence ────────────────────────────────────────────────────────
+// ── Theme persistence ──────────────────────────────────────────────────────────
 
 type Theme = "light" | "dark" | "system";
 
@@ -24,49 +26,62 @@ function getStoredTheme(): Theme {
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement;
-  if (theme === "dark") {
-    root.setAttribute("data-theme", "dark");
-  } else if (theme === "light") {
-    root.setAttribute("data-theme", "light");
-  } else {
-    root.removeAttribute("data-theme");
-  }
+  if (theme === "dark")       root.setAttribute("data-theme", "dark");
+  else if (theme === "light") root.setAttribute("data-theme", "light");
+  else                        root.removeAttribute("data-theme");
   localStorage.setItem("omniai_theme", theme);
 }
 
-// Apply theme before first render to prevent flash
+// Apply before first render to prevent flash
 applyTheme(getStoredTheme());
 
-// ── App ──────────────────────────────────────────────────────────────────────
+// ── Provider health context (passed down via props for simplicity) ─────────────
+
+export interface AppContext {
+  hasLLMProvider: boolean;
+}
+
+// ── App ────────────────────────────────────────────────────────────────────────
 
 export function App() {
   const { t, locale, setLocale } = useI18n();
-  const [principal, setPrincipal] = useState<Principal | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState("");
-  const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const [principal, setPrincipal]   = useState<Principal | null>(null);
+  const [loading, setLoading]        = useState(true);
+  const [authError, setAuthError]    = useState("");
+  const [theme, setThemeState]       = useState<Theme>(getStoredTheme);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [providers, setProviders]    = useState<Provider[]>([]);
+  const location = useLocation();
 
   // Publish i18n store for non-hook consumers
-  useEffect(() => {
-    setI18nStore({ t, locale });
-  }, [t, locale]);
+  useEffect(() => { setI18nStore({ t, locale }); }, [t, locale]);
 
+  // Auth check on mount
   useEffect(() => {
-    api
-      .me()
+    api.me()
       .then(setPrincipal)
       .catch(() => setPrincipal(null))
       .finally(() => setLoading(false));
   }, []);
 
-  // Global ⌘+K / Ctrl+K handler
+  // Load provider status once logged in (so pages can show setup warnings)
+  useEffect(() => {
+    if (!principal) return;
+    api.providers().then(setProviders).catch(() => {});
+  }, [principal]);
+
+  // Close sidebar on navigation (mobile)
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+
+  // Global ⌘+K / Ctrl+K
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
+      if (e.key === "Escape") setSidebarOpen(false);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -78,7 +93,11 @@ export function App() {
     setThemeState(next);
   }
 
-  const themeIcon = theme === "dark" ? "🌙" : theme === "light" ? "☀️" : "💻";
+  const themeLabel  = theme === "system" ? t("theme.system") : theme === "dark" ? t("theme.dark") : t("theme.light");
+  const hasLLM      = providers.some((p) => p.enabled && p.kind === "llm");
+  const appCtx: AppContext = { hasLLMProvider: hasLLM };
+
+  // ── Loading / auth screens ───────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -86,6 +105,7 @@ export function App() {
         <section className="panel auth-panel" aria-busy="true">
           <p className="eyebrow">Omni-AI</p>
           <h1>{t("auth.workspaceLoading")}</h1>
+          <div className="auth-loading-bar" aria-hidden="true" />
         </section>
       </main>
     );
@@ -93,82 +113,167 @@ export function App() {
 
   if (!principal) {
     return (
-      <LoginScreen
-        error={authError}
-        t={t}
-        onLogin={async (email, password) => {
-          setAuthError("");
-          try {
-            const result = await api.login(email, password);
-            setPrincipal(result.principal);
-          } catch (error) {
-            setAuthError(error instanceof ApiError ? error.message : t("auth.loginFailed"));
-          }
-        }}
-      />
+      <ToastProvider>
+        <LoginScreen
+          error={authError}
+          t={t}
+          onLogin={async (email, password) => {
+            setAuthError("");
+            try {
+              const result = await api.login(email, password);
+              setPrincipal(result.principal);
+            } catch (error) {
+              setAuthError(error instanceof ApiError ? error.message : t("auth.loginFailed"));
+            }
+          }}
+        />
+      </ToastProvider>
     );
   }
 
+  // ── Nav items ────────────────────────────────────────────────────────────────
+
   const navItems = [
-    { to: "/",          label: t("nav.overview") },
-    { to: "/knowledge", label: t("nav.knowledge") },
-    { to: "/chat",      label: t("nav.chat") },
-    { to: "/agents",    label: t("nav.agents") },
-    { to: "/search",    label: t("nav.search") },
-    { to: "/deploy",    label: t("nav.deploy") },
-    { to: "/admin",     label: t("nav.admin") },
+    { to: "/",          label: t("nav.overview"),  group: "main",     icon: "⊞" },
+    { to: "/knowledge", label: t("nav.knowledge"), group: "main",     icon: "📂" },
+    { to: "/chat",      label: t("nav.chat"),       group: "main",     icon: "💬" },
+    { to: "/agents",    label: t("nav.agents"),     group: "advanced", icon: "⚡" },
+    { to: "/search",    label: t("nav.search"),     group: "advanced", icon: "🔍" },
+    { to: "/deploy",    label: t("nav.deploy"),     group: "advanced", icon: "🚀" },
+    { to: "/admin",     label: t("nav.admin"),      group: "advanced", icon: "⚙" },
   ];
 
+  // ── Render ───────────────────────────────────────────────────────────────────
+
   return (
-    <>
+    <ToastProvider>
       {/* WCAG 2.4.1 — Skip to main content */}
-      <a href="#main-content" className="skip-link">
-        Skip to main content
-      </a>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+
+      {/* Mobile overlay — closes sidebar when tapping outside */}
+      {sidebarOpen && (
+        <div
+          className="sidebar-overlay"
+          aria-hidden="true"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Mobile top bar */}
+      <header className="mobile-topbar" aria-label="Mobile navigation">
+        <button
+          type="button"
+          className="hamburger"
+          aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+          aria-expanded={sidebarOpen}
+          aria-controls="sidebar"
+          onClick={() => setSidebarOpen((v) => !v)}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <span className="mobile-brand">Omni-AI</span>
+        <button
+          type="button"
+          className="theme-toggle mobile-theme-btn"
+          onClick={cycleTheme}
+          aria-label={`Theme: ${theme}`}
+          title={t("theme.toggle")}
+        >
+          {themeLabel}
+        </button>
+      </header>
 
       <div className="app-shell">
-        <aside className="sidebar" aria-label="Primary navigation">
-          <div>
+        <aside
+          id="sidebar"
+          className={`sidebar${sidebarOpen ? " sidebar-open" : ""}`}
+          aria-label="Primary navigation"
+        >
+          {/* Brand */}
+          <div className="sidebar-brand">
             <p className="eyebrow" aria-hidden="true">Omni-AI</p>
-            <h1 style={{ fontSize: "1.15rem", margin: "0 0 4px" }}>Omni-AI</h1>
-            <p className="muted" style={{ margin: 0, fontSize: "0.83rem" }}>{principal.tenantName}</p>
+            <h1 className="sidebar-title">Omni-AI</h1>
+            <p className="muted sidebar-tenant">{principal.tenantName}</p>
           </div>
 
+          {/* Provider health indicator */}
+          {!hasLLM && providers.length > 0 /* loaded but none enabled */ && (
+            <div className="sidebar-alert" role="status">
+              <strong>No LLM enabled</strong>
+              <NavLink to="/admin" className="sidebar-alert-link">Set up in Admin →</NavLink>
+            </div>
+          )}
+          {providers.length === 0 && (
+            <div className="sidebar-alert sidebar-alert-warn" role="status">
+              <strong>Setup required</strong>
+              <span>Add an AI provider to enable Chat and Agents.</span>
+              <NavLink to="/admin" className="sidebar-alert-link">Open Admin →</NavLink>
+            </div>
+          )}
+
+          {/* Nav */}
           <nav className="nav-list" aria-label="Primary">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-                aria-current={undefined}
-              >
-                {item.label}
-              </NavLink>
-            ))}
+            <div className="nav-group">
+              <span className="nav-group-label">Start here</span>
+              {navItems.filter((item) => item.group === "main").map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && <span className="sr-only">(current page)</span>}
+                      <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                      {item.label}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+            <div className="nav-group">
+              <span className="nav-group-label">Advanced</span>
+              {navItems.filter((item) => item.group === "advanced").map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && <span className="sr-only">(current page)</span>}
+                      <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                      {item.label}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           </nav>
 
-          {/* Keyboard shortcut hint */}
+          {/* Command palette shortcut */}
           <button
             type="button"
-            className="secondary-button small-button"
-            style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 6, color: "#b7c2d2", background: "transparent", border: "1px solid rgba(255,255,255,0.12)" }}
+            className="palette-trigger"
             onClick={() => setPaletteOpen(true)}
             aria-label="Open command palette"
             aria-keyshortcuts="Control+K Meta+K"
           >
-            <span aria-hidden="true">⌘</span>
-            <span style={{ fontSize: "0.8rem" }}>Command palette</span>
-            <kbd style={{ marginLeft: "auto", fontSize: "0.7rem", opacity: 0.7 }}>⌘K</kbd>
+            <span>Command palette</span>
+            <kbd>⌘K</kbd>
           </button>
 
+          {/* User card */}
           <div className="user-card" role="complementary" aria-label="User account">
-            <strong aria-label={`Signed in as ${principal.displayName}`}>{principal.displayName}</strong>
-            <span style={{ fontSize: "0.82rem" }}>{principal.email}</span>
-            <span style={{ fontSize: "0.82rem" }}>{principal.role}</span>
-
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {/* Theme toggle */}
+            <div className="user-card-info">
+              <strong aria-label={`Signed in as ${principal.displayName}`}>{principal.displayName}</strong>
+              <span className="user-email">{principal.email}</span>
+              <span className="user-role">{principal.role}</span>
+            </div>
+            <div className="user-card-actions">
               <button
                 type="button"
                 className="theme-toggle"
@@ -176,11 +281,8 @@ export function App() {
                 aria-label={`${t("theme.toggle")} (currently ${theme})`}
                 title={t("theme.toggle")}
               >
-                <span aria-hidden="true">{themeIcon}</span>
-                <span>{theme === "system" ? t("theme.system") : theme === "dark" ? t("theme.dark") : t("theme.light")}</span>
+                {themeLabel}
               </button>
-
-              {/* Language picker */}
               <select
                 className="lang-picker"
                 value={locale}
@@ -191,15 +293,10 @@ export function App() {
                 <option value="es">ES</option>
               </select>
             </div>
-
             <button
-              className="secondary-button small-button"
-              style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#dbe4f0" }}
+              className="secondary-button small-button signout-btn"
               type="button"
-              onClick={async () => {
-                await api.logout();
-                setPrincipal(null);
-              }}
+              onClick={async () => { await api.logout(); setPrincipal(null); }}
             >
               {t("auth.signOut")}
             </button>
@@ -207,26 +304,38 @@ export function App() {
         </aside>
 
         <main id="main-content" className="content" tabIndex={-1}>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/agents" element={<AgentsPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/deploy" element={<DeploymentsPage />} />
-            <Route path="/admin" element={<AdminPage />} />
-          </Routes>
+          <ErrorBoundary key={location.pathname}>
+            <Routes>
+              <Route path="/"          element={<HomePage appCtx={appCtx} />} />
+              <Route path="/knowledge" element={<KnowledgePage />} />
+              <Route path="/chat"      element={<ChatPage appCtx={appCtx} />} />
+              <Route path="/agents"    element={<AgentsPage appCtx={appCtx} />} />
+              <Route path="/search"    element={<SearchPage />} />
+              <Route path="/deploy"    element={<DeploymentsPage />} />
+              <Route path="/admin"     element={<AdminPage onProvidersChange={setProviders} />} />
+              <Route
+                path="*"
+                element={
+                  <section className="page">
+                    <div className="panel stack">
+                      <p className="eyebrow">Not found</p>
+                      <h2>Page not found</h2>
+                      <p className="empty-state">Use the sidebar to return to a workspace page.</p>
+                    </div>
+                  </section>
+                }
+              />
+            </Routes>
+          </ErrorBoundary>
         </main>
       </div>
 
-      {/* Command palette — rendered outside app-shell so it can be full-screen */}
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-      />
-    </>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+    </ToastProvider>
   );
 }
+
+// ── Login screen ──────────────────────────────────────────────────────────────
 
 function LoginScreen({
   error,
@@ -237,18 +346,15 @@ function LoginScreen({
   t: (key: string) => string;
   onLogin: (email: string, password: string) => Promise<void>;
 }) {
-  const [email, setEmail] = useState("admin@omniai.local");
-  const [password, setPassword] = useState("Admin12345!");
+  const [email, setEmail]         = useState("admin@omniai.local");
+  const [password, setPassword]   = useState("Admin12345!");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
-    try {
-      await onLogin(email, password);
-    } finally {
-      setSubmitting(false);
-    }
+    try   { await onLogin(email, password); }
+    finally { setSubmitting(false); }
   }
 
   return (
@@ -279,9 +385,17 @@ function LoginScreen({
           />
         </label>
         {error ? <p className="alert" role="alert">{error}</p> : null}
-        <button className="primary-button" type="submit" disabled={submitting} aria-busy={submitting}>
+        <button
+          className="primary-button"
+          type="submit"
+          disabled={submitting}
+          aria-busy={submitting}
+        >
           {submitting ? t("auth.signingIn") : t("auth.signIn")}
         </button>
+        <p className="login-hint muted">
+          Default: <code>admin@omniai.local</code> / <code>Admin12345!</code>
+        </p>
       </form>
     </main>
   );

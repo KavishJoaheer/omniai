@@ -1,7 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Agent, AgentRun, ApiError, Collection, api } from "../../api/client";
+import { AppContext } from "../../app/App";
 import { downloadBlob } from "../../components/downloadBlob";
+import { SetupBanner } from "../../components/SetupBanner";
+import { HelpTip } from "../../components/Tooltip";
 
 type AgentNode = NonNullable<Agent["definition"]["nodes"]>[number];
 type AgentNodeType = "start" | "retrieval" | "generate" | "message" | "code" | "end";
@@ -15,7 +18,7 @@ const ADDABLE_NODE_TYPES: Array<{ label: string; type: AgentNodeType }> = [
 
 const DEFAULT_FALLBACK = "I could not find a grounded answer in the knowledge base.";
 
-export function AgentsPage() {
+export function AgentsPage({ appCtx }: { appCtx: AppContext }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -277,6 +280,14 @@ export function AgentsPage() {
 
   return (
     <section className="page">
+      {!appCtx.hasLLMProvider && (
+        <SetupBanner
+          title="No LLM provider configured"
+          description="Agent 'generate' nodes require an LLM. Add one in Admin to run agents."
+          kind="warning"
+          action={{ label: "Set up in Admin →", href: "/admin" }}
+        />
+      )}
       <header className="page-header">
         <div>
           <p className="eyebrow">Agent Builder</p>

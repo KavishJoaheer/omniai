@@ -1,11 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Citation, Collection, Conversation, Document, Message, api } from "../../api/client";
+import { AppContext } from "../../app/App";
 import { downloadBlob } from "../../components/downloadBlob";
+import { SetupBanner } from "../../components/SetupBanner";
+import { HelpTip } from "../../components/Tooltip";
 
 type LocalMessage = Pick<Message, "role" | "content" | "citations"> & { id: string };
 
-export function ChatPage() {
+export function ChatPage({ appCtx }: { appCtx: AppContext }) {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -273,6 +276,14 @@ export function ChatPage() {
 
   return (
     <section className="page">
+      {!appCtx.hasLLMProvider && (
+        <SetupBanner
+          title="No LLM provider configured"
+          description="Go to Admin and add an AI provider (OpenAI, Anthropic, Ollama, etc.) to enable chat."
+          kind="warning"
+          action={{ label: "Set up in Admin →", href: "/admin" }}
+        />
+      )}
       <header className="page-header">
         <div>
           <p className="eyebrow">Grounded Chat</p>
@@ -380,7 +391,7 @@ export function ChatPage() {
               </div>
               <label className="inline-check">
                 <input checked={rerank} onChange={(event) => setRerank(event.target.checked)} type="checkbox" />
-                Rerank
+                Rerank <HelpTip text="Re-orders retrieved passages by relevance before answering. Gives better results but is slightly slower." />
               </label>
             </div>
             <div className="collection-filter">
