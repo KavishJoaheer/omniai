@@ -41,7 +41,6 @@ class MultiModalEmbeddingProvider:
     """
 
     kind = "multimodal"
-    dimension = _CLIP_DIM
 
     def __init__(
         self,

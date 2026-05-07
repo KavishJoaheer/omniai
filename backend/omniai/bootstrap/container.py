@@ -10,7 +10,7 @@ from omniai.adapters.relational.sqlalchemy.session import DatabaseManager
 from omniai.adapters.search.factory import build_search_engine
 from omniai.application.auth_service import AuthService
 from omniai.application.connector_service import ConnectorScheduler, build_sync_lock
-from omniai.application.ingestion_service import PARSE_JOB_NAME
+from omniai.application.ingestion_service import GRAPH_JOB_NAME, INDEX_JOB_NAME, PARSE_JOB_NAME
 from omniai.application.provider_service import seed_default_providers
 from omniai.config.settings import Settings
 from omniai.observability.metrics import MetricsRegistry
@@ -27,9 +27,7 @@ from omniai.ports.sandbox import SandboxPort
 from omniai.ports.search_engine import SearchEnginePort
 from omniai.security.secrets import SecretBox
 from omniai.utils.cache import RetrievalCachePort, build_retrieval_cache
-from omniai.workers.graph_extraction import GRAPH_JOB_NAME
 from omniai.workers.graph_extraction import extract_graph as extract_graph_handler
-from omniai.workers.indexing import INDEX_JOB_NAME
 from omniai.workers.indexing import index_document as index_document_handler
 from omniai.workers.parsing import parse_document as parse_document_handler
 

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -74,7 +74,6 @@ def _run(coro):
 def _make_agent_service(*, cost_alert_usd: float = 0.0):
     """Create an AgentService with mocked store, retrieval, and sandbox."""
     from omniai.application.agent_service import AgentService
-    from omniai.ports.search_engine import SearchHit
 
     mock_store = MagicMock()
     mock_retrieval = MagicMock()
@@ -125,7 +124,6 @@ class TestParallelFanOut:
 
     def test_fan_out_merges_references(self):
         from omniai.application.agent_service import AgentService
-        from omniai.ports.search_engine import SearchHit
 
         def _fake_hit(chunk_id, doc_id, coll_id, score, text):
             h = MagicMock()
@@ -187,7 +185,7 @@ class TestParallelFanOut:
             retrieval_service=mock_retrieval,
         )
 
-        result = _run(service._execute_run(mock_agent, mock_run))
+        _run(service._execute_run(mock_agent, mock_run))
         # Both branches should have been executed → 2 retrieval calls
         assert call_count == 2
 
@@ -199,7 +197,7 @@ class TestParallelFanOut:
 class TestHumanInTheLoop:
 
     def test_human_input_node_raises_paused_error(self):
-        from omniai.application.agent_service import AgentService, _PausedError
+        from omniai.application.agent_service import _PausedError
 
         service = _make_agent_service()
         node = {"id": "review", "type": "human_input",
@@ -257,7 +255,6 @@ class TestHumanInTheLoop:
         assert "PAUSED" in captured_status
 
     def test_pre_supplied_human_input_skips_pause(self):
-        from omniai.application.agent_service import AgentService
 
         service = _make_agent_service()
         node = {"id": "review", "type": "human_input", "config": {"prompt": "Approve?"}}
@@ -306,7 +303,7 @@ class TestTimeTravelReplay:
 
         service = AgentService(store=mock_store, retrieval_service=mock_retrieval)
 
-        result = _run(service.replay_run("agt_1", "run_orig", ReplayAgentRunInput(from_event=0)))
+        _run(service.replay_run("agt_1", "run_orig", ReplayAgentRunInput(from_event=0)))
 
         # create_run should have been called with replay tracking fields
         call_kwargs = mock_store.create_run.call_args.kwargs

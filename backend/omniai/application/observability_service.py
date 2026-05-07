@@ -7,11 +7,9 @@ Provides:
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -20,11 +18,9 @@ from sqlalchemy.orm import Session
 from omniai.adapters.relational.sqlalchemy.models import (
     RetrievalFeedbackRecord,
     TokenUsageRecord,
-    generate_prefixed_id,
 )
 from omniai.application.auth_service import AuthenticatedPrincipal
 from omniai.config.settings import Settings
-from omniai.domain.knowledge.models import utc_now
 from omniai.security.permissions import Perm, assert_permission
 
 logger = logging.getLogger(__name__)

@@ -18,12 +18,11 @@ Config schema
 """
 from __future__ import annotations
 
-import io
 import json
 import logging
 from collections.abc import AsyncIterator
 
-from omniai.connectors.base import DiscoveredFile, guess_mime
+from omniai.connectors.base import DiscoveredFile
 
 logger = logging.getLogger(__name__)
 

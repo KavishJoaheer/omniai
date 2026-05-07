@@ -20,7 +20,6 @@ import json
 import logging
 import logging.config
 import sys
-import traceback
 from datetime import datetime, timezone
 from typing import Any
 

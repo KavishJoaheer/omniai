@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 _ADMIN_EMAIL = "test@local.dev"
@@ -648,9 +648,9 @@ class TestDatabaseConnector:
         import asyncio
         from omniai.connectors.database import DatabaseConnector
 
-        db_url = "sqlite:///:memory:"
         # We need a persistent SQLite file for this test
-        import tempfile, os
+        import tempfile
+        import os
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
 
@@ -683,7 +683,8 @@ class TestDatabaseConnector:
     def test_discover_with_where_clause(self):
         import asyncio
         from omniai.connectors.database import DatabaseConnector
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -724,7 +725,8 @@ class TestDatabaseConnector:
     def test_discover_with_template(self):
         import asyncio
         from omniai.connectors.database import DatabaseConnector
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name

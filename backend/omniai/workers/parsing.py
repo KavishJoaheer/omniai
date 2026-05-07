@@ -5,7 +5,7 @@ import logging
 
 from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
 from omniai.adapters.relational.sqlalchemy.session import DatabaseManager
-from omniai.application.ingestion_service import build_parsed_text_key
+from omniai.application.ingestion_service import build_parsed_text_key, INDEX_JOB_NAME
 from omniai.plugins.parsers import ParserRegistry
 from omniai.ports.object_store import ObjectStorePort
 from omniai.ports.queue import JobQueuePort
@@ -13,7 +13,7 @@ from omniai.ports.queue import JobQueuePort
 logger = logging.getLogger(__name__)
 
 
-INDEX_JOB_NAME = "index_document"
+
 
 
 async def parse_document(

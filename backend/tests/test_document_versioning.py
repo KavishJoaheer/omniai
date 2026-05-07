@@ -1,8 +1,7 @@
 """Tests for document versioning (upsert-by-name) in IngestionService."""
 from __future__ import annotations
 
-import io
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -131,7 +130,7 @@ async def test_updated_content_updates_existing_document(ingestion, mock_store, 
     updated_doc = _make_document(sha256=new_sha)
     mock_store.update_document_storage.return_value = updated_doc
 
-    doc = await ingestion.upload_document(
+    await ingestion.upload_document(
         collection_id="col1",
         filename="test.txt",
         mime_type="text/plain",
@@ -246,7 +245,7 @@ async def test_unsupported_mime_raises(ingestion, mock_parsers):
 @pytest.mark.asyncio
 async def test_update_document_storage_args(ingestion, mock_store, mock_queue):
     """Ensure update_document_storage is called with the new sha256 and object_key."""
-    import hashlib, os
+    import hashlib
 
     old_sha = "OLD_SHA_HEX_PLACEHOLDER_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     existing = _make_document(sha256=old_sha)

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from omniai.application.retrieval_service import RetrievalRequest, RetrievalResponse, RetrievalService
+from omniai.application.retrieval_service import RetrievalRequest, RetrievalService
 from omniai.ports.search_engine import SearchHit
 from omniai.utils.cache import InProcessCache, deserialize, serialize
 

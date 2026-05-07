@@ -29,12 +29,11 @@ from omniai.adapters.relational.sqlalchemy.models import (
     OIDCStateRecord,
     TenantMembershipRecord,
     UserRecord,
-    generate_prefixed_id,
 )
 from omniai.application.auth_service import AuthenticatedPrincipal
 from omniai.config.settings import Settings
 from omniai.domain.knowledge.models import utc_now
-from omniai.security.hashing import hash_password, verify_password
+from omniai.security.hashing import hash_password
 from omniai.security.permissions import Perm, assert_permission
 
 logger = logging.getLogger(__name__)

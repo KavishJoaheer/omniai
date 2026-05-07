@@ -23,8 +23,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -82,7 +81,6 @@ class TestHyDE:
 
     def test_generate_hypothetical_doc_uses_llm(self):
         from omniai.application.retrieval_service import RetrievalService
-        from omniai.ports.search_engine import SearchHit
 
         mock_llm = MagicMock()
         mock_llm.list_models = AsyncMock(return_value=["model-a"])

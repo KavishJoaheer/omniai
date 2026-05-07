@@ -1,7 +1,6 @@
 """Tests for the agent code-node — sandbox wiring inside AgentService."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

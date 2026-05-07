@@ -1,7 +1,6 @@
 """Tests for the upgraded Okapi BM25 + RRF hybrid search in InMemorySearchEngine."""
 from __future__ import annotations
 
-import pytest
 
 from omniai.adapters.search.in_memory import InMemorySearchEngine, _tokenize
 from omniai.ports.search_engine import IndexableChunk

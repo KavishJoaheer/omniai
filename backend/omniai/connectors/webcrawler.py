@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import re
+from collections.abc import AsyncIterator
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+
+from omniai.connectors.base import DiscoveredFile
+
 """Web-crawler connector.
 
 Crawls one or more seed URLs up to a configurable depth, extracts plain text
@@ -19,17 +30,6 @@ Config schema
   "exclude_patterns": ["#", "?", "login"]  # substrings that cause a URL to be skipped
 }
 """
-
-import asyncio
-import logging
-import re
-from collections.abc import AsyncIterator
-from urllib.parse import urljoin, urlparse
-
-import httpx
-from bs4 import BeautifulSoup
-
-from omniai.connectors.base import DiscoveredFile
 
 logger = logging.getLogger(__name__)
 

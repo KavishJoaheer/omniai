@@ -88,7 +88,7 @@ def _build_text_pdf_with_two_pages() -> bytes:
     Used to assert OCR is NOT invoked when the threshold is satisfied.
     Skips the test if reportlab is not available.
     """
-    reportlab = pytest.importorskip("reportlab")
+    pytest.importorskip("reportlab")
     from io import BytesIO
     from reportlab.pdfgen.canvas import Canvas
 

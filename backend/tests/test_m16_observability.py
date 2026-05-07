@@ -217,7 +217,6 @@ class TestOTelTracing:
         """
         from omniai.observability.tracing import configure_tracing
         from unittest.mock import MagicMock
-        import logging
         settings = MagicMock()
         settings.otel_exporter_otlp_endpoint = "http://localhost:4317"
         settings.otel_service_name = "test-service"

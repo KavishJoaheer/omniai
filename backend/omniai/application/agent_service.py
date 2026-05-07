@@ -398,7 +398,7 @@ class AgentService:
             if node_type in ("fan_out", "join"):
                 continue
             try:
-                node_output = await self._execute_node(node, definition, context)
+                await self._execute_node(node, definition, context)
             except _PausedError:
                 break  # Can't pause inside a parallel branch — skip
             except Exception as exc:

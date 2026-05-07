@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from omniai.adapters.relational.sqlalchemy.models import ChunkRecord
 from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
@@ -48,7 +47,7 @@ def test_tag_chunk_pages_assigns_pages_and_strips_markers(container, tenant_id):
         {"text": page_marker(2) + "Still on page 2. " + page_marker(3) + "Now on page 3.", "metadata": {}},
         {"text": "Trailing chunk with no marker.", "metadata": {}},
     ]
-    persisted = store.replace_chunks(document_id=doc.id, chunks=chunks, template_name="general")
+    store.replace_chunks(document_id=doc.id, chunks=chunks, template_name="general")
 
     session = container.database.new_session()
     try:

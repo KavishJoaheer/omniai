@@ -18,7 +18,7 @@ from omniai.observability.metrics import MetricsRegistry
 from omniai.ports.object_store import ObjectStorePort
 from omniai.ports.queue import JobQueuePort
 from omniai.security.permissions import Perm, assert_permission
-from omniai.application.ingestion_service import PARSE_JOB_NAME
+from omniai.application.ingestion_service import PARSE_JOB_NAME, INDEX_JOB_NAME
 
 collection_router = APIRouter(prefix="/v1/collections/{collection_id}/documents", tags=["documents"])
 document_router = APIRouter(prefix="/v1/documents", tags=["documents"])

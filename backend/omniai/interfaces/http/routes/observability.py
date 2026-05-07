@@ -1,8 +1,7 @@
 """M16 — Observability & Cost routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query
 
 from omniai.application.auth_service import AuthService, AuthenticatedPrincipal
 from omniai.application.observability_service import ObservabilityService, RetrievalFeedbackInput

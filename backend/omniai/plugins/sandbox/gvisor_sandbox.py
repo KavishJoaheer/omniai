@@ -37,9 +37,7 @@ import logging
 import os
 import shutil
 import tarfile
-import tempfile
 import time
-from pathlib import Path
 
 from omniai.ports.sandbox import SandboxRequest, SandboxResult
 

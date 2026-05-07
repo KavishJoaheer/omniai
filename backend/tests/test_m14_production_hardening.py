@@ -9,9 +9,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -145,8 +143,6 @@ class TestAccountLockout:
         self._register_test_user(container, email)
 
         from omniai.application.auth_service import AuthService, LoginInput
-        from omniai.adapters.relational.sqlalchemy.models import UserRecord
-        from sqlalchemy import select
 
         threshold = container.settings.login_lockout_threshold
         session = container.database.new_session()

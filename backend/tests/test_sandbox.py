@@ -13,9 +13,7 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
-import os
 
-import pytest
 
 from omniai.plugins.sandbox.subprocess_sandbox import SubprocessSandbox
 from omniai.ports.sandbox import SandboxRequest

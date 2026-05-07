@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 PARSE_JOB_NAME = "parse_document"
+INDEX_JOB_NAME = "index_document"
+GRAPH_JOB_NAME = "extract_graph"
 
 
 @dataclass(slots=True)

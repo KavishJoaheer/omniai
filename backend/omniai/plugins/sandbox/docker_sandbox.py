@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+import logging
+import os
+import time
+
+from omniai.ports.sandbox import SandboxRequest, SandboxResult
+
 """Docker-based Python sandbox.
 
 Runs each code snippet inside a disposable ``python:3.11-slim`` container
@@ -31,16 +39,7 @@ Security properties
 * Container is always ``--rm`` (auto-deleted on exit).
 """
 
-import asyncio
-import base64
-import json
-import logging
-import os
-import tempfile
-import time
-from pathlib import Path
 
-from omniai.ports.sandbox import SandboxRequest, SandboxResult
 
 logger = logging.getLogger(__name__)
 

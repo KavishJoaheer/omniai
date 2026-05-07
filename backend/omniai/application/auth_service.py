@@ -146,7 +146,7 @@ class AuthService:
         return self._build_auth_result(principal, token)
 
     def login(self, payload: LoginInput) -> dict:
-        from datetime import datetime, timedelta, timezone as _tz
+        from datetime import datetime, timezone as _tz
 
         email = self._normalize_email(payload.email)
         user = self._session.scalar(select(UserRecord).where(UserRecord.email == email))

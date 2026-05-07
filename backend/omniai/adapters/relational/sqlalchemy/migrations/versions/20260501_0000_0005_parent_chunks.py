@@ -11,7 +11,6 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
-from alembic.operations import BatchOperations
 
 revision: str = "0005_parent_chunks"
 down_revision: Union[str, None] = "0004_conversations"

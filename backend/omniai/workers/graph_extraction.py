@@ -15,8 +15,6 @@ from omniai.security.secrets import SecretBox
 
 logger = logging.getLogger(__name__)
 
-GRAPH_JOB_NAME = "extract_graph"
-
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
 

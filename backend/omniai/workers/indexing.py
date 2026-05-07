@@ -9,6 +9,7 @@ from sqlalchemy import update
 from omniai.adapters.relational.sqlalchemy.models import ChunkRecord
 from omniai.adapters.relational.sqlalchemy.repositories import SqlAlchemyKnowledgeStore
 from omniai.adapters.relational.sqlalchemy.session import DatabaseManager
+from omniai.application.ingestion_service import GRAPH_JOB_NAME
 from omniai.config.settings import Settings
 from omniai.domain.knowledge.models import Chunk
 from omniai.plugins.chunk_templates import ChunkTemplateRegistry
@@ -17,11 +18,11 @@ from omniai.plugins.parsers.pdf import PAGE_MARKER_RE
 from omniai.ports.object_store import ObjectStorePort
 from omniai.ports.queue import JobQueuePort
 from omniai.ports.search_engine import IndexableChunk, SearchEnginePort
-from omniai.workers.graph_extraction import GRAPH_JOB_NAME
+
 
 logger = logging.getLogger(__name__)
 
-INDEX_JOB_NAME = "index_document"
+
 
 
 async def index_document(

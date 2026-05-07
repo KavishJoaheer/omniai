@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from omniai.ports.search_engine import IndexableChunk, SearchEnginePort, SearchHit
+from omniai.ports.search_engine import IndexableChunk, SearchHit
 
 logger = logging.getLogger(__name__)
 
