@@ -38,3 +38,6 @@ htmlcov/
 # Local runtime data
 data/
 backend/data/
+
+frontend/playwright-report/
+frontend/test-results/

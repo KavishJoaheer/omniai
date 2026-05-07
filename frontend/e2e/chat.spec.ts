@@ -23,8 +23,8 @@ async function login(page: import("@playwright/test").Page) {
 test.describe("Chat page", () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: /chat/i }).click();
-    await expect(page.getByRole("heading", { name: /rag chat/i, exact: false })).toBeVisible();
+    await page.getByRole("navigation", { name: /Primary/i }).getByRole("link", { name: /Ask/i, exact: true }).click();
+    await expect(page.getByRole("heading", { name: /rag chat/i, exact: false })).toBeVisible({ timeout: 10_000 });
   });
 
   test("new chat button creates a conversation entry in the sidebar", async ({ page }) => {
@@ -49,7 +49,7 @@ test.describe("Chat page", () => {
 
     await page.getByRole("button", { name: /new chat/i }).click();
     // The new conversation should appear in the sidebar list
-    await expect(page.getByText("New conversation")).toBeVisible({ timeout: 6_000 });
+    await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible({ timeout: 6_000 });
   });
 
   test("regenerate button is disabled before any assistant message", async ({ page }) => {
@@ -84,7 +84,6 @@ test.describe("Chat page", () => {
     });
 
     await page.reload();
-    await expect(page.getByTitle(/export as markdown/i)).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle(/export as json/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible({ timeout: 8_000 });
   });
 });

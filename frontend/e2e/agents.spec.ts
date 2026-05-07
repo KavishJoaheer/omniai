@@ -23,8 +23,8 @@ async function login(page: import("@playwright/test").Page) {
 test.describe("Agents page", () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: /agents/i }).click();
-    await expect(page.getByRole("heading", { name: /agent builder/i, exact: false })).toBeVisible();
+    await page.getByRole("navigation", { name: /Primary/i }).getByRole("link", { name: /Workflows/i, exact: true }).click();
+    await expect(page.getByRole("heading", { name: /agent runtime/i, exact: false })).toBeVisible();
   });
 
   test("create-agent form has required name field", async ({ page }) => {
@@ -73,8 +73,8 @@ test.describe("Agents page", () => {
     await page.reload();
     const canvas = page.getByLabel("Agent graph canvas");
     await expect(canvas).toBeVisible({ timeout: 8_000 });
-    await expect(canvas.getByText("Start")).toBeVisible();
-    await expect(canvas.getByText("End")).toBeVisible();
+    await expect(canvas.getByText("Start").first()).toBeVisible();
+    await expect(canvas.getByText("End").first()).toBeVisible();
   });
 
   test("export run buttons appear when latest run exists", async ({ page }) => {

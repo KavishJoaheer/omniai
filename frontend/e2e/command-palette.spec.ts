@@ -24,7 +24,9 @@ async function login(page: import("@playwright/test").Page) {
 }
 
 test.describe("Command Palette", () => {
-  test.beforeEach(login);
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+  });
 
   test("opens with Ctrl+K shortcut", async ({ page }) => {
     await page.keyboard.press("Control+k");

@@ -23,7 +23,7 @@ async function login(page: import("@playwright/test").Page) {
 test.describe("Knowledge page", () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: /knowledge/i }).click();
+    await page.getByRole("navigation", { name: /Primary/i }).getByRole("link", { name: /Documents/i, exact: true }).click();
     await expect(page.getByRole("heading", { name: /collections and documents/i })).toBeVisible();
   });
 
@@ -31,7 +31,7 @@ test.describe("Knowledge page", () => {
     const collectionName = `Test-${Date.now()}`;
     await page.getByLabel(/^name/i).first().fill(collectionName);
     await page.getByRole("button", { name: /^create$/i }).click();
-    await expect(page.getByText(collectionName)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('heading', { name: collectionName })).toBeVisible({ timeout: 8_000 });
   });
 
   test("upload file button is disabled when no collection is selected", async ({ page }) => {
@@ -42,9 +42,9 @@ test.describe("Knowledge page", () => {
 
   test("bulk action bar appears when at least one document is selected", async ({ page }) => {
     // Check all checkbox (select-all). Even with 0 docs the bulk bar should not appear.
-    const selectAll = page.getByRole("checkbox", { name: /select all/i });
-    if (await selectAll.isVisible()) {
-      await selectAll.check();
+    const selectAll = page.getByRole("checkbox", { name: /select all documents/i });
+    if (await selectAll.isVisible() && await selectAll.isEnabled()) {
+      await selectAll.click({ force: true });
       // If docs exist the bulk bar should appear; otherwise nothing to assert
       const bulkBar = page.getByRole("region", { name: /bulk actions/i });
       if (await bulkBar.isVisible()) {
