@@ -15,7 +15,7 @@ import { es } from "./es";
 
 export type Locale = "en" | "es";
 
-type TranslationTree = typeof en.translation;
+type TranslationTree = { [key: string]: string | TranslationTree };
 
 const LOCALES: Record<Locale, { translation: TranslationTree }> = { en, es };
 

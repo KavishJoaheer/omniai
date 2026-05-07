@@ -83,7 +83,12 @@ async def parse_document(
             page_count=result.page_count,
             parser_name=parser.name,
         )
-        logger.info("parse_document: %s parsed (parser=%s, %d chars) — queuing index", document_id, parser.name, len(result.text))
+        logger.info(
+            "parse_document: %s parsed (parser=%s, %d chars); queuing index",
+            document_id,
+            parser.name,
+            len(result.text),
+        )
 
     await queue.enqueue(
         job_name=INDEX_JOB_NAME,

@@ -2,13 +2,13 @@
 export const es = {
   translation: {
     nav: {
-      overview: "Resumen",
-      knowledge: "Conocimiento",
-      chat: "Chat",
-      agents: "Agentes",
-      search: "Búsqueda",
-      deploy: "Despliegue",
-      admin: "Administración",
+      overview: "Inicio",
+      knowledge: "Documentos",
+      chat: "Preguntar",
+      agents: "Flujos",
+      search: "Fragmentos",
+      deploy: "Compartir",
+      admin: "Ajustes",
     },
     auth: {
       signIn: "Iniciar sesión",
@@ -55,7 +55,7 @@ export const es = {
     },
     palette: {
       placeholder: "Buscar comandos y páginas…",
-      noResults: "Sin resultados para "{{query}}"",
+      noResults: 'Sin resultados para "{{query}}"',
       goTo: "Ir a",
       actions: "Acciones",
     },

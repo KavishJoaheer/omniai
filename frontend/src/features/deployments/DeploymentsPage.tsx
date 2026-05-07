@@ -244,7 +244,7 @@ export function DeploymentsPage() {
                 <div>
                   <p className="eyebrow">Public URL</p>
                   <a
-                    href={`http://localhost:9380/c/${selected.slug}/info`}
+                    href={`/c/${selected.slug}/info`}
                     target="_blank"
                     rel="noreferrer"
                     className="code-link"
@@ -282,7 +282,7 @@ export function DeploymentsPage() {
                   Click below — this URL is accessible without logging in:
                 </p>
                 <a
-                  href={`http://localhost:9380/c/${selected.slug}/info`}
+                  href={`/c/${selected.slug}/info`}
                   target="_blank"
                   rel="noreferrer"
                 >

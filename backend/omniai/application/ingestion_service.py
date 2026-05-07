@@ -220,15 +220,11 @@ class IngestionService:
     def delete_document(self, *, document_id: str, search_engine: SearchEnginePort | None = None) -> None:
         document = self._store.get_document(document_id)
 
-        # Remove from search engine first
         if search_engine is not None:
             try:
-                search_engine.delete_by_document(
-                    tenant_id=self._tenant_id,
-                    document_id=document_id,
-                )
+                search_engine.delete_by_document(tenant_id=self._tenant_id, document_id=document_id)
             except Exception:
-                pass
+                logger.debug("delete_document: search index cleanup failed", exc_info=True)
 
         # Remove stored objects
         for key in (document.object_key, document.parsed_text_key):

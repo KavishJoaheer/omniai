@@ -91,6 +91,7 @@ services:
       OBJECT_STORE_BUCKET: omniai
       SEARCH_KIND: opensearch
       SEARCH_URL: http://opensearch:9200
+      RAG_SERVICE_URL: http://host.docker.internal:8020
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       ENCRYPTION_KEY: dev-only-do-not-use-in-prod-change-me-32b
       AUTH_SECRET: dev-only-change-me
@@ -124,6 +125,10 @@ services:
       OBJECT_STORE_ACCESS_KEY: omniai
       OBJECT_STORE_SECRET_KEY: omniai-minio-dev
       OBJECT_STORE_BUCKET: omniai
+      SEARCH_KIND: opensearch
+      SEARCH_URL: http://opensearch:9200
+      RAG_SERVICE_URL: http://host.docker.internal:8020
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
       ENCRYPTION_KEY: dev-only-do-not-use-in-prod-change-me-32b
       AUTH_SECRET: dev-only-change-me
     depends_on:
@@ -135,6 +140,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../..:/workspace
 

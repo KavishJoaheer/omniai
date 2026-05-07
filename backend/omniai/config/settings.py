@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     search_kind: str = Field(default="opensearch", alias="SEARCH_KIND")
     search_url: str | None = Field(default=None, alias="SEARCH_URL")
     search_snapshot_path: str | None = Field(default=None, alias="SEARCH_SNAPSHOT_PATH")
+    # Optional external model1-style rag-service bridge. Native retrieval remains
+    # the default; set SEARCH_KIND=rag_service to route queries through this URL.
+    rag_service_url: str = Field(default="http://127.0.0.1:8020", alias="RAG_SERVICE_URL")
+    lightrag_url: str | None = Field(default=None, alias="LIGHTRAG_URL")
 
     reranker_kind: str = Field(default="paired", alias="RERANKER_KIND")
     reranker_model: str = Field(default="BAAI/bge-reranker-base", alias="RERANKER_MODEL")
@@ -146,6 +150,10 @@ class Settings(BaseSettings):
 
     def oidc_client_secret(self, provider: str) -> str | None:
         return getattr(self, f"{provider.lower()}_client_secret", None)
+
+    @property
+    def effective_rag_service_url(self) -> str:
+        return (self.lightrag_url or self.rag_service_url or "http://127.0.0.1:8020").rstrip("/")
 
 
 @lru_cache(maxsize=1)

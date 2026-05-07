@@ -15,6 +15,9 @@ def build_search_engine(settings: Settings) -> SearchEnginePort:
     if kind == "opensearch":
         url = settings.search_url or "http://localhost:9200"
         return OpenSearchEngine(url=url)
+    if kind in {"rag_service", "lightrag", "model1_rag"}:
+        from omniai.adapters.search.rag_service import RagServiceSearchEngine
+        return RagServiceSearchEngine(settings)
     if kind == "pgvector":
         from omniai.adapters.search.pgvector import PgvectorSearchEngine
         connection_string = settings.db_url.replace("sqlite:///", "postgresql://", 1) if "sqlite" in settings.db_url else settings.db_url
@@ -35,4 +38,7 @@ def build_search_engine(settings: Settings) -> SearchEnginePort:
             api_key=settings.weaviate_api_key,
             class_name=settings.weaviate_class_name,
         )
-    raise ValueError(f"Unsupported SEARCH_KIND={kind!r}. Valid options: memory, opensearch, pgvector, pinecone, weaviate")
+    raise ValueError(
+        f"Unsupported SEARCH_KIND={kind!r}. Valid options: "
+        "memory, opensearch, rag_service, pgvector, pinecone, weaviate"
+    )

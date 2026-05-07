@@ -92,20 +92,12 @@ async def index_document(
             template_name=template.name,
         )
 
-        # For small-to-big templates, wire up parent_chunk_id on child chunks.
         _link_parent_chunks(session, all_chunks)
-
-        # Tag each chunk with the page number derived from [OMNI_PAGE_N] markers
-        # left by the PDF parser, then strip the markers from the chunk text.
         _tag_chunk_pages(session, all_chunks)
 
-        # Reload chunks so parent_chunk_id + metadata + cleaned text are fresh
         all_chunks = store.list_chunks(document_id=document_id)
-
-        # Only embed + index chunks that are marked indexable (children, or all for flat templates)
-        indexable_chunks = [c for c in all_chunks if c.is_indexable]
+        indexable_chunks = [chunk for chunk in all_chunks if chunk.is_indexable]
         if not indexable_chunks:
-            # All chunks are parents — fall back to indexing everything
             indexable_chunks = all_chunks
 
         provider, model_name = build_embedding_provider(
@@ -115,7 +107,7 @@ async def index_document(
             requested_model=collection.embedding_model,
         )
         try:
-            vectors = await provider.embed(model=model_name, inputs=[c.text for c in indexable_chunks])
+            vectors = await provider.embed(model=model_name, inputs=[chunk.text for chunk in indexable_chunks])
         except Exception as exc:
             logger.exception("index_document: embedding failed for %s", document_id)
             store.update_status(
@@ -125,7 +117,7 @@ async def index_document(
             )
             return
 
-        if len(vectors) != len(indexable_chunks) or any(not v for v in vectors):
+        if len(vectors) != len(indexable_chunks) or any(not vector for vector in vectors):
             store.update_status(
                 document_id=document_id,
                 status="FAILED",
@@ -186,33 +178,24 @@ async def index_document(
 
 
 def _link_parent_chunks(session, all_chunks: list[Chunk]) -> None:
-    """For small-to-big templates, set parent_chunk_id on child chunks.
-
-    Parent chunks carry metadata['chunk_kind'] == 'parent' and metadata['parent_index'] = N.
-    Child chunks carry metadata['chunk_kind'] == 'child' and metadata['parent_index'] = N.
-    We look up parent chunks by parent_index and write the parent chunk's DB id into
-    the child's parent_chunk_id column.
-    """
-    has_hierarchy = any(c.metadata.get("chunk_kind") == "parent" for c in all_chunks)
+    has_hierarchy = any(chunk.metadata.get("chunk_kind") == "parent" for chunk in all_chunks)
     if not has_hierarchy:
         return
 
-    # Build parent_index -> chunk.id map for parent chunks
     parent_id_by_index: dict[int, str] = {}
     for chunk in all_chunks:
         if chunk.metadata.get("chunk_kind") == "parent":
-            idx = chunk.metadata.get("parent_index")
-            if idx is not None:
-                parent_id_by_index[idx] = chunk.id
+            index = chunk.metadata.get("parent_index")
+            if index is not None:
+                parent_id_by_index[index] = chunk.id
 
     if not parent_id_by_index:
         return
 
-    # Update child records in bulk
     for chunk in all_chunks:
         if chunk.metadata.get("chunk_kind") == "child":
-            parent_idx = chunk.metadata.get("parent_index")
-            parent_id = parent_id_by_index.get(parent_idx) if parent_idx is not None else None
+            parent_index = chunk.metadata.get("parent_index")
+            parent_id = parent_id_by_index.get(parent_index) if parent_index is not None else None
             if parent_id:
                 session.execute(
                     update(ChunkRecord)
@@ -223,15 +206,7 @@ def _link_parent_chunks(session, all_chunks: list[Chunk]) -> None:
 
 
 def _tag_chunk_pages(session, all_chunks: list[Chunk]) -> None:
-    """Scan each chunk's text for [OMNI_PAGE_N] markers, write page_number into
-    chunk.metadata.page_number (and start_page/end_page when a chunk crosses a
-    boundary), and strip the markers out of the stored text and char/token counts.
-
-    Chunks with no marker inherit the previous chunk's page_number (typical for
-    chunks that span past a marker into mid-content).
-    """
-    if not any(PAGE_MARKER_RE.search(c.text) for c in all_chunks):
-        # No PDF markers in any chunk → likely a non-PDF document, skip.
+    if not any(PAGE_MARKER_RE.search(chunk.text) for chunk in all_chunks):
         return
 
     last_page: int | None = None
@@ -243,11 +218,10 @@ def _tag_chunk_pages(session, all_chunks: list[Chunk]) -> None:
             page_number = start_page
             last_page = end_page
         else:
-            page_number = last_page  # may be None for chunks before the first marker
+            page_number = last_page
 
         cleaned_text = PAGE_MARKER_RE.sub("", chunk.text).strip()
-        # Re-tighten paragraph breaks the marker created
-        cleaned_text = "\n\n".join(p for p in cleaned_text.split("\n\n") if p.strip())
+        cleaned_text = "\n\n".join(part for part in cleaned_text.split("\n\n") if part.strip())
 
         new_metadata = {**chunk.metadata}
         if page_number is not None:

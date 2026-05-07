@@ -3,13 +3,13 @@ export const en = {
   translation: {
     // Navigation
     nav: {
-      overview: "Overview",
-      knowledge: "Knowledge",
-      chat: "Chat",
-      agents: "Agents",
-      search: "Search",
-      deploy: "Deploy",
-      admin: "Admin",
+      overview: "Home",
+      knowledge: "Documents",
+      chat: "Ask",
+      agents: "Workflows",
+      search: "Find passages",
+      deploy: "Share",
+      admin: "Settings",
     },
     // Auth
     auth: {
@@ -61,7 +61,7 @@ export const en = {
     // Command palette
     palette: {
       placeholder: "Search commands and pages…",
-      noResults: "No results for "{{query}}"",
+      noResults: 'No results for "{{query}}"',
       goTo: "Go to",
       actions: "Actions",
     },

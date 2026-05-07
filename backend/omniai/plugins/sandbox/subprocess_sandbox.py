@@ -53,7 +53,8 @@ class SubprocessSandbox:
             bash = shutil.which("bash")
             if bash is None:
                 raise FileNotFoundError("bash executable not found on PATH")
-            return [bash, str(script_path)]
+            script_arg = _bash_path(script_path, bash) if sys.platform == "win32" else str(script_path)
+            return [bash, script_arg]
         raise ValueError(f"unsupported language: {language!r}")
 
     def _script_name(self, language: str) -> str:
@@ -168,3 +169,13 @@ class SubprocessSandbox:
             timed_out=timed_out,
             artifacts=artifacts,
         )
+
+
+def _bash_path(path: Path, bash_exe: str) -> str:
+    """Return a Windows path in a form the discovered bash can open."""
+    posix = path.resolve().as_posix()
+    if len(posix) >= 3 and posix[1:3] == ":/":
+        if "windows/system32/bash" in bash_exe.replace("\\", "/").lower():
+            return f"/mnt/{posix[0].lower()}{posix[2:]}"
+        return f"/{posix[0].lower()}{posix[2:]}"
+    return posix

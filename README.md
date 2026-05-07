@@ -48,6 +48,28 @@ npm run dev
 
 Frontend runs at `http://localhost:5173`.
 
+## Retrieval Modes
+
+By default, model2 uses its native retrieval pipeline:
+
+- parser worker extracts text
+- indexing worker chunks and embeds
+- `SEARCH_KIND` selects the search adapter (`memory`, `opensearch`, `pgvector`,
+  `pinecone`, or `weaviate`)
+- retrieval keeps cache, HyDE, reranking, parent expansion, and graph context in
+  the model2 service layer
+
+To query a running model1-style rag-service instead, set:
+
+```bash
+SEARCH_KIND=rag_service
+RAG_SERVICE_URL=http://127.0.0.1:8020
+```
+
+`LIGHTRAG_URL` is accepted as a legacy alias, but `RAG_SERVICE_URL` is the
+preferred name because this points at the rag-service orchestration API, not at
+the raw LightRAG server.
+
 ## Current status
 
 This is an implementation foundation, not the full product yet. It gives us:

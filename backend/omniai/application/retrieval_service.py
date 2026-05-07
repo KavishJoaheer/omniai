@@ -25,12 +25,11 @@ class RetrievalRequest:
     document_ids: list[str] | None = None
     embedding_model: str = "nomic-embed-text"
     rerank: bool = True
-    # M19 — HyDE (Hypothetical Document Embeddings)
-    # When True the retrieval service generates a short hypothetical answer and
-    # embeds it instead of the raw query.  The blended query vector is used for
-    # the ANN look-up while the original query string is kept for BM25.
+    # M19: HyDE (Hypothetical Document Embeddings).
+    # When enabled, the vector lookup embeds the original query plus a short
+    # hypothetical answer while BM25 still receives the raw query string.
     hyde: bool = False
-    hyde_model: str = ""  # empty → use whatever LLM is wired in
+    hyde_model: str = ""
 
 
 @dataclass(slots=True)
@@ -62,12 +61,7 @@ class RetrievalService:
         self._cache_ttl = cache_ttl
         self._llm = llm_provider
 
-    # ------------------------------------------------------------------
-    # Cache key helpers
-    # ------------------------------------------------------------------
-
     def _cache_key(self, request: RetrievalRequest) -> str:
-        """Stable SHA-256 key over all parameters that affect the result."""
         payload = {
             "tenant": self._tenant_id,
             "q": request.query.strip(),
@@ -78,17 +72,19 @@ class RetrievalService:
             "model": request.embedding_model,
             "rerank": request.rerank,
             "hyde": request.hyde,
+            "hyde_model": request.hyde_model,
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return "ret:" + hashlib.sha256(raw.encode()).hexdigest()
 
-    # ------------------------------------------------------------------
-
     async def retrieve(self, request: RetrievalRequest) -> RetrievalResponse:
         if not request.query.strip():
-            return RetrievalResponse(hits=[], embedding_model=request.embedding_model, vector_weight=request.vector_weight)
+            return RetrievalResponse(
+                hits=[],
+                embedding_model=request.embedding_model,
+                vector_weight=request.vector_weight,
+            )
 
-        # ── Cache read ────────────────────────────────────────────────
         cache_key: str | None = None
         if self._cache is not None and self._cache_ttl > 0:
             cache_key = self._cache_key(request)
@@ -96,29 +92,29 @@ class RetrievalService:
             if cached:
                 result = deserialize(cached)
                 if isinstance(result, RetrievalResponse):
-                    logger.debug("Retrieval cache HIT key=%s", cache_key)
+                    logger.debug("retrieval cache hit key=%s", cache_key)
                     return result
 
-        # ── HyDE: Hypothetical Document Embeddings ────────────────────
         embed_text = request.query
         if request.hyde and self._llm is not None:
             try:
-                hypothetical = await self._generate_hypothetical_doc(request.query, request.hyde_model)
+                hypothetical = await self._generate_hypothetical_doc(
+                    request.query,
+                    request.hyde_model,
+                )
                 if hypothetical.strip():
-                    # Blend original query + hypothetical answer for the vector
                     embed_text = f"{request.query}\n\n{hypothetical}"
             except Exception:
-                pass  # Graceful fallback to raw query
+                logger.debug("HyDE generation failed; falling back to raw query", exc_info=True)
 
         try:
             vectors = await self._embeddings.embed(model=request.embedding_model, inputs=[embed_text])
             query_vector = vectors[0]
         except Exception:
+            logger.debug("query embedding failed; continuing with sparse-only search", exc_info=True)
             query_vector = []
 
-        # Over-fetch when re-ranking is enabled so we have headroom to reorder
         fetch_k = request.top_k * 3 if request.rerank else request.top_k
-
         hits = self._search.hybrid_search(
             tenant_id=self._tenant_id,
             query=request.query,
@@ -129,20 +125,14 @@ class RetrievalService:
             document_ids=request.document_ids,
         )
 
-        # Re-rank: re-embed each candidate with the query and recompute cosine.
-        # The first-stage hybrid search uses chunk-time embeddings only; this stage
-        # has the embedding model "see" the query alongside the candidate text.
         if request.rerank and len(hits) > 1 and query_vector:
             hits = await self._rerank(request.query, hits, request.embedding_model)
 
-        # Trim to requested top_k after re-ranking
         hits = hits[: request.top_k]
 
-        # Apply MMR diversification when we have more hits than needed
         if len(hits) > 1:
             hits = _mmr(hits, query_vector, top_k=request.top_k)
 
-        # Expand child hits to parent text for small-to-big templates
         if self._store is not None:
             hits = _expand_to_parents(hits, self._store)
             hits = _augment_with_graph(
@@ -159,31 +149,23 @@ class RetrievalService:
             vector_weight=request.vector_weight,
         )
 
-        # ── Cache write ───────────────────────────────────────────────
         if cache_key is not None and self._cache is not None:
             blob = serialize(response)
             if blob:
                 self._cache.set(cache_key, blob, self._cache_ttl)
-                logger.debug("Retrieval cache SET key=%s ttl=%ds", cache_key, self._cache_ttl)
+                logger.debug("retrieval cache set key=%s ttl=%ds", cache_key, self._cache_ttl)
 
         return response
 
     async def _generate_hypothetical_doc(self, query: str, model: str) -> str:
-        """Generate a short hypothetical answer (HyDE) for the given query.
-
-        The LLM is instructed to write a concise excerpt that *would* appear in
-        a document that answers the question.  We then embed this instead of the
-        raw query to improve dense-retrieval recall for factoid questions.
-        """
         if self._llm is None:
             return ""
         prompt = (
             "Write a short paragraph (3-5 sentences) that would appear in a document "
-            f"answering the following question. Do not add a preamble; just write the passage.\n\n"
+            "answering the following question. Do not add a preamble; just write the passage.\n\n"
             f"Question: {query}"
         )
         messages = [LlmMessage(role="user", content=prompt)]
-        # Try the first available model if none specified
         try:
             available = await self._llm.list_models()
             target_model = model or (available[0] if available else "")
@@ -195,7 +177,11 @@ class RetrievalService:
 
         chunks: list[str] = []
         try:
-            async for chunk in self._llm.stream_chat(model=target_model, messages=messages, max_tokens=200):
+            async for chunk in self._llm.stream_chat(
+                model=target_model,
+                messages=messages,
+                max_tokens=200,
+            ):
                 chunks.append(chunk.delta)
                 if chunk.finish_reason:
                     break
@@ -209,12 +195,6 @@ class RetrievalService:
         hits: list[SearchHit],
         embedding_model: str,
     ) -> list[SearchHit]:
-        """Second-stage re-rank.
-
-        Delegates to the configured RerankerPort if available; otherwise falls
-        back to paired-embedding scoring. Final score is a 0.7/0.3 blend of
-        (rerank_score, first_stage_score).
-        """
         if not hits:
             return hits
 
@@ -228,7 +208,6 @@ class RetrievalService:
             except Exception:
                 rerank_scores = []
 
-        # Fallback: paired-embedding scoring using the embedding provider directly
         if not rerank_scores or len(rerank_scores) != len(hits):
             try:
                 anchor = await self._embeddings.embed(model=embedding_model, inputs=[f"query: {query}"])
@@ -245,31 +224,34 @@ class RetrievalService:
         if not rerank_scores or len(rerank_scores) != len(hits):
             return hits
 
-        # Normalize rerank_scores to [0,1] so blending is meaningful regardless
-        # of which scorer produced them (cross-encoder logits vs. cosine sims).
         max_score = max(rerank_scores)
         min_score = min(rerank_scores)
         spread = (max_score - min_score) or 1.0
-        normed = [(s - min_score) / spread for s in rerank_scores]
+        normed = [(score - min_score) / spread for score in rerank_scores]
 
         rescored: list[tuple[float, SearchHit]] = []
         for hit, raw_score, norm_score in zip(hits, rerank_scores, normed):
             blended = 0.7 * norm_score + 0.3 * hit.score
-            rescored.append((blended, SearchHit(
-                chunk_id=hit.chunk_id,
-                document_id=hit.document_id,
-                collection_id=hit.collection_id,
-                score=blended,
-                text=hit.text,
-                snippet=hit.snippet,
-                metadata={
-                    **hit.metadata,
-                    "first_stage_score": hit.score,
-                    "rerank_score": float(raw_score),
-                },
-            )))
-        rescored.sort(key=lambda x: x[0], reverse=True)
-        return [h for _, h in rescored]
+            rescored.append(
+                (
+                    blended,
+                    SearchHit(
+                        chunk_id=hit.chunk_id,
+                        document_id=hit.document_id,
+                        collection_id=hit.collection_id,
+                        score=blended,
+                        text=hit.text,
+                        snippet=hit.snippet,
+                        metadata={
+                            **hit.metadata,
+                            "first_stage_score": hit.score,
+                            "rerank_score": float(raw_score),
+                        },
+                    ),
+                )
+            )
+        rescored.sort(key=lambda item: item[0], reverse=True)
+        return [hit for _, hit in rescored]
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -289,10 +271,6 @@ def _mmr(
     top_k: int,
     diversity: float = 0.3,
 ) -> list[SearchHit]:
-    """Maximal Marginal Relevance re-ranking for diversity.
-
-    diversity=0 → pure relevance, diversity=1 → pure diversity.
-    """
     if not hits or not query_vector:
         return hits[:top_k]
 
@@ -301,18 +279,12 @@ def _mmr(
 
     while remaining and len(selected) < top_k:
         if not selected:
-            # First pick: highest relevance score
-            best = max(remaining, key=lambda h: h.score)
+            best = max(remaining, key=lambda hit: hit.score)
         else:
-            # MMR: balance relevance vs. redundancy with already-selected hits
             def mmr_score(candidate: SearchHit) -> float:
-                rel = candidate.score
-                # Redundancy = max cosine similarity to any selected hit
-                redundancy = max(
-                    _text_overlap(candidate.text, sel.text)
-                    for sel in selected
-                )
-                return (1.0 - diversity) * rel - diversity * redundancy
+                relevance = candidate.score
+                redundancy = max(_text_overlap(candidate.text, picked.text) for picked in selected)
+                return (1.0 - diversity) * relevance - diversity * redundancy
 
             best = max(remaining, key=mmr_score)
 
@@ -323,7 +295,6 @@ def _mmr(
 
 
 def _text_overlap(a: str, b: str) -> float:
-    """Quick token-overlap similarity as a proxy for semantic similarity."""
     tokens_a = set(a.lower().split())
     tokens_b = set(b.lower().split())
     if not tokens_a or not tokens_b:
@@ -332,11 +303,6 @@ def _text_overlap(a: str, b: str) -> float:
 
 
 def _expand_to_parents(hits: list[SearchHit], store: KnowledgeStorePort) -> list[SearchHit]:
-    """Replace child hit text with parent chunk text for small-to-big retrieval.
-
-    The parent_chunk_id is stored in the hit metadata (set during indexing).
-    Deduplicate so that multiple children from the same parent only appear once.
-    """
     seen_parent_ids: set[str] = set()
     expanded: list[SearchHit] = []
     for hit in hits:

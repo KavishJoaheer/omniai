@@ -18,7 +18,7 @@ from omniai.observability.metrics import MetricsRegistry
 from omniai.ports.object_store import ObjectStorePort
 from omniai.ports.queue import JobQueuePort
 from omniai.security.permissions import Perm, assert_permission
-from omniai.workers.indexing import INDEX_JOB_NAME
+from omniai.application.ingestion_service import PARSE_JOB_NAME
 
 collection_router = APIRouter(prefix="/v1/collections/{collection_id}/documents", tags=["documents"])
 document_router = APIRouter(prefix="/v1/documents", tags=["documents"])
@@ -69,7 +69,7 @@ async def bulk_document_action(
                     raise ValueError("Document has no parsed text to re-index.")
                 service.update_document_status(doc_id, "PARSED")
                 await queue.enqueue(
-                    job_name=INDEX_JOB_NAME,
+                    job_name=PARSE_JOB_NAME,
                     payload={"tenant_id": principal.tenant_id, "document_id": doc_id},
                 )
             succeeded.append(doc_id)

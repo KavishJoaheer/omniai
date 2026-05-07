@@ -30,7 +30,6 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["chunk_templates"] = build_chunk_registry()
     ctx["search_engine"] = build_search_engine(settings)
     ctx["secret_box"] = SecretBox(settings.encryption_key)
-    # give parse worker a minimal queue so it can chain into index
     ctx["queue"] = ArqJobQueue(redis_url=settings.redis_url)
     logger.info("worker started against db=%s object_store=%s", settings.db_url, settings.object_store_kind)
 

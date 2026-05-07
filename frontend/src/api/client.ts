@@ -262,6 +262,16 @@ export type Provider = {
   updatedAt?: string;
 };
 
+export type ProviderInput = {
+  kind?: string;
+  name?: string;
+  base_url?: string | null;
+  default_model?: string | null;
+  enabled?: boolean;
+  api_key?: string | null;
+  options?: Record<string, unknown>;
+};
+
 export type Deployment = {
   id: string;
   name: string;
@@ -583,7 +593,10 @@ export const api = {
   tenant: () => request<TenantInfo>("/v1/tenants/current"),
   teams: () => request<Team[]>("/v1/teams"),
   users: () => request<UserSummary[]>("/v1/admin/users"),
-  auditEvents: () => request<AuditEvent[]>("/v1/admin/audit-events"),
+  auditEvents: async () => {
+    const result = await request<AuditEvent[] | { items: AuditEvent[] }>("/v1/admin/audit-events");
+    return Array.isArray(result) ? result : result.items;
+  },
   apiKeys: () => request<ApiKeySummary[]>("/v1/api-keys"),
   createApiKey: (name: string, scopes: string[]) =>
     request<ApiKeyCreated>("/v1/api-keys", {
@@ -595,6 +608,20 @@ export const api = {
       method: "POST"
     }),
   providers: () => request<Provider[]>("/v1/providers"),
+  createProvider: (payload: ProviderInput & { kind: string; name: string }) =>
+    request<Provider>("/v1/providers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateProvider: (providerId: string, payload: ProviderInput) =>
+    request<Provider>(`/v1/providers/${providerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProvider: (providerId: string) =>
+    request<{ deleted: boolean }>(`/v1/providers/${providerId}`, {
+      method: "DELETE",
+    }),
 
   // Deploy Manager
   listDeployments: () => request<Deployment[]>("/v1/deployments"),
